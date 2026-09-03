@@ -70,10 +70,11 @@ def observe() -> dict:
         if wrist_target
         else horizontal_decision(main_target, main.shape[1])
     )
-    # Main-camera centering is only search guidance.  The hand-off to IK is
-    # permitted exclusively by the left-wrist Y-centering gate.
+    # At the stowed initial arm pose the wrist may not see the table at all.
+    # Main centering completes only this coarse base stage; the mandatory
+    # pregrasp wrist gate later rechecks lateral alignment before closing.
     if not wrist_target and decision == "centered":
-        decision = "search_from_main_center"
+        decision = "main_centered"
     return {
         "source": source,
         "decision": decision,
@@ -92,15 +93,8 @@ def main() -> int:
     parser.add_argument("--maximum-steps", type=int, default=12)
     parser.add_argument("--step-m", type=float, default=0.02)
     parser.add_argument("--allow-odom-only", action="store_true")
-    parser.add_argument(
-        "--main-centered-search-direction",
-        choices=("move_left", "move_right"),
-        default="move_left",
-        help="calibrated hand-off direction until the wrist target enters view",
-    )
     args = parser.parse_args()
     history = []
-    last_main_direction = None
     for _ in range(args.maximum_steps):
         state = observe()
         history.append(state)
@@ -108,16 +102,18 @@ def main() -> int:
         if state["decision"] == "centered":
             print(json.dumps({"status": "centered", "history": history}, indent=2))
             return 0
+        if state["decision"] == "main_centered":
+            print(json.dumps({
+                "status": "main_centered_wrist_deferred_to_mandatory_pregrasp_gate",
+                "history": history,
+            }, indent=2))
+            return 0
         if not args.execute:
             print(json.dumps({"status": "dry_run", "history": history}, indent=2))
             return 0
         if state["decision"] == "not_visible":
             raise RuntimeError("target absent from both cameras; search direction is ambiguous")
         decision = state["decision"]
-        if state["source"] == "main" and decision in ("move_left", "move_right"):
-            last_main_direction = decision
-        if decision == "search_from_main_center":
-            decision = last_main_direction or args.main_centered_search_direction
         move_right(
             args.step_m if decision == "move_right" else -args.step_m,
             allow_odom_only=args.allow_odom_only,

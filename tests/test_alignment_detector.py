@@ -74,7 +74,7 @@ def test_main_target_rejects_candidate_above_table_band(monkeypatch):
     assert main_table_target(image) is None
 
 
-def test_main_center_is_search_handoff_not_not_visible(monkeypatch):
+def test_main_center_defers_wrist_gate_until_pregrasp(monkeypatch):
     image = np.full((720, 1280, 3), 170, np.uint8)
     target = Target((640.0, 400.0), (600, 360, 80, 80), 6400.0, 0.9)
     monkeypatch.setattr("align_to_thermal_pad.frame", lambda _: image)
@@ -84,4 +84,4 @@ def test_main_center_is_search_handoff_not_not_visible(monkeypatch):
     state = observe()
     assert state["main_visible"] is True
     assert state["wrist_visible"] is False
-    assert state["decision"] == "search_from_main_center"
+    assert state["decision"] == "main_centered"
