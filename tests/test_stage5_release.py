@@ -8,6 +8,14 @@ def test_release_target_moves_backward_and_down_together():
     assert np.allclose(target, [0.89, 0.1, 0.79])
 
 
+def test_initial_and_rotating_descent_total_15mm():
+    start = np.array([1.0, 0.1, 0.8])
+    lowered = release_target(start, 0.0, 0.008)
+    target = release_target(lowered, 0.11, 0.007)
+    assert np.allclose(lowered, [1.0, 0.1, 0.792])
+    assert np.allclose(target, [0.89, 0.1, 0.785])
+
+
 def test_gripper_begins_at_6cm_and_arm_keeps_retracting():
     events = []
 

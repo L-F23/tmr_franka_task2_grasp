@@ -105,10 +105,11 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
     parser.add_argument("--backward-m", type=float, default=0.11)
-    parser.add_argument("--down-m", type=float, default=0.003)
+    parser.add_argument("--initial-down-m", type=float, default=0.008)
+    parser.add_argument("--down-m", type=float, default=0.007)
     parser.add_argument("--tilt-down-deg", type=float, default=90.0)
     parser.add_argument("--open-after-m", type=float, default=0.06)
-    parser.add_argument("--maximum-contact-drop-m", type=float, default=0.003)
+    parser.add_argument("--maximum-contact-drop-m", type=float, default=0.015)
     parser.add_argument("--speed-rad-s", type=float, default=0.05)
     args = parser.parse_args()
     if not args.execute:
@@ -117,12 +118,14 @@ def main() -> int:
         parser.error("--backward-m must be in [0.10, 0.12]")
     if not 0.0 <= args.down_m <= 0.01:
         parser.error("--down-m must be in [0, 0.01]")
+    if not 0.0 < args.initial_down_m <= 0.01:
+        parser.error("--initial-down-m must be in (0, 0.01]")
     if not 1.0 <= args.tilt_down_deg <= 90.0:
         parser.error("--tilt-down-deg must be in [1, 90]")
     if not 0.04 <= args.open_after_m < args.backward_m:
         parser.error("--open-after-m must be in [0.04, backward-m)")
-    if not 0.0 <= args.maximum_contact_drop_m <= 0.01:
-        parser.error("--maximum-contact-drop-m must be in [0, 0.01]")
+    if not 0.008 <= args.maximum_contact_drop_m <= 0.02:
+        parser.error("--maximum-contact-drop-m must be in [0.008, 0.02]")
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
     rclpy.init()
@@ -132,6 +135,7 @@ def main() -> int:
     report = {
         "status": "starting",
         "requested_backward_m": args.backward_m,
+        "requested_initial_down_m": args.initial_down_m,
         "requested_down_m": args.down_m,
         "gripper_motion": "begin_opening_near_6cm; continue_retracting_while_opening",
         "open_after_retreat_m": args.open_after_m,
@@ -156,7 +160,8 @@ def main() -> int:
             raise RuntimeError("Franka errors: " + ",".join(errors))
         start_pose = node.fk(node.joints)
         start_position, orientation = pose_values(start_pose)
-        raw_target = release_target(start_position, args.backward_m, args.down_m)
+        lowered_start = release_target(start_position, 0.0, args.initial_down_m)
+        raw_target = release_target(lowered_start, args.backward_m, args.down_m)
         motion = config["motion_sequence"]
         tilted_orientation = tilt_axis_toward(
             orientation,
@@ -167,14 +172,18 @@ def main() -> int:
         contact_local = np.asarray(config["grasp"]["link8_to_finger_contact_local_m"], dtype=float)
         start_contact = np.asarray(start_position) + quaternion_matrix(orientation) @ contact_local
         minimum_contact_z = float(start_contact[2]) - args.maximum_contact_drop_m
-        plan, seed = [], list(node.joints)
-        previous_position = np.asarray(start_position, dtype=float)
+        plan, seed = node.solve_pose_segment(
+            "release_initial_down_8mm",
+            np.asarray(start_position, dtype=float), lowered_start,
+            orientation, orientation, node.joints,
+        )
+        previous_position = np.asarray(lowered_start, dtype=float)
         previous_orientation = np.asarray(orientation, dtype=float)
         clearance_compensations = []
         # Ten milestones make translation and the 90-degree dump simultaneous.
         for index, fraction in enumerate(np.linspace(0.1, 1.0, 10), 1):
-            raw_position = np.asarray(start_position) + fraction * (
-                np.asarray(raw_target) - np.asarray(start_position)
+            raw_position = np.asarray(lowered_start) + fraction * (
+                np.asarray(raw_target) - np.asarray(lowered_start)
             )
             milestone_orientation = slerp(orientation, tilted_orientation, float(fraction))
             milestone_position, compensation = clearance_compensated_position(
@@ -195,6 +204,7 @@ def main() -> int:
             "link8_base_orientation_xyzw": orientation,
         }
         report["raw_target_link8_base_position_m"] = raw_target.tolist()
+        report["initial_lowered_link8_base_position_m"] = lowered_start.tolist()
         report["target_link8_base_position_m"] = previous_position.tolist()
         report["target_link8_base_orientation_xyzw"] = tilted_orientation
         report["minimum_finger_contact_base_z_m"] = minimum_contact_z
