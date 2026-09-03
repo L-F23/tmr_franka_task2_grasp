@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "sample_id": "20260903_222646_zed_arm_stage1_start",
+  "capture_time": "2026-09-03T22:26:46+08:00",
+  "motion_commanded_during_capture": false,
+  "zed": {
+    "status": "live_verified",
+    "serial_number": 17064700,
+    "source_url": "http://172.16.0.50:18082/tmr_zed_latest.jpg",
+    "vision_domain_id": 1,
+    "image_width_px": 1280,
+    "image_height_px": 720,
+    "original_file": "20260903_222646_zed.jpg",
+    "annotated_file": "20260903_222646_zed_annotated.jpg",
+    "original_sha256": "2f6265e5c3b887bbe26175b8a8dd842aa1a2e9493c2f8b91a95aff53b339d21b",
+    "freshness_check": {
+      "consecutive_frames_compared": 2,
+      "hashes_different": true,
+      "last_modified_advanced_s": 1.0
+    }
+  },
+  "left_arm": {
+    "joint_names": [
+      "left_fr3v2_joint1",
+      "left_fr3v2_joint2",
+      "left_fr3v2_joint3",
+      "left_fr3v2_joint4",
+      "left_fr3v2_joint5",
+      "left_fr3v2_joint6",
+      "left_fr3v2_joint7"
+    ],
+    "measured_joint_positions_rad": [
+      -0.39071330428123474,
+      1.8154850006103516,
+      0.6052743196487427,
+      -1.9640450477600098,
+      2.1782991886138916,
+      1.411530613899231,
+      -1.577883243560791
+    ],
+    "moveit_fk_link8_position_base_m": [
+      0.8078432574331492,
+      -0.03165906615917356,
+      0.8438397568111207
+    ],
+    "moveit_fk_link8_orientation_base_xyzw": [
+      -0.49995925774818695,
+      0.499791570910061,
+      -0.5001470225024733,
+      0.5001020717024135
+    ],
+    "gripper_position": 0.7894070484581498,
+    "gripper_state": "closed_empty_or_unverified",
+    "active_franka_errors": [],
+    "spine_position_m": 0.6,
+    "coordinate_warning": "Use the MoveIt FK base-frame link8 pose above for ground-aligned geometry. The FCI current_pose values have shoulder-local semantics even when the message header says base."
+  },
+  "mobile_base": {
+    "odom_position_xy_m": [
+      -0.1228611192915135,
+      -0.5969494389241313
+    ],
+    "odom_orientation_z_w": [
+      -0.0001615627460994941,
+      0.9999999869487395
+    ],
+    "stationary": true
+  },
+  "annotations": {
+    "coordinate_convention": "image x increases right; image y increases down",
+    "white_table_roi_polygon_xy": [
+      [395, 266],
+      [1153, 265],
+      [1279, 390],
+      [1279, 719],
+      [350, 719]
+    ],
+    "left_arm_visible_roi_polygon_xy": [
+      [0, 0],
+      [600, 0],
+      [791, 116],
+      [840, 451],
+      [806, 586],
+      [657, 719],
+      [0, 719]
+    ],
+    "left_wrist_end_effector_partial_bbox_xyxy": [585, 520, 840, 719],
+    "green_strip_markers": [
+      {
+        "id": 1,
+        "center_xy": [869.6038, 430.6132],
+        "rotated_box_xy": [[847, 394], [870, 387], [893, 468], [870, 474]]
+      },
+      {
+        "id": 2,
+        "center_xy": [963.8538, 433.8001],
+        "rotated_box_xy": [[934, 398], [955, 388], [993, 470], [972, 480]]
+      },
+      {
+        "id": 3,
+        "center_xy": [1071.4819, 434.5127],
+        "rotated_box_xy": [[1034, 399], [1051, 388], [1108, 470], [1092, 481]]
+      }
+    ],
+    "thermal_pad": {
+      "visibility": "not_visible",
+      "label_available": false
+    },
+    "black_base": {
+      "visibility": "not_visible",
+      "label_available": false
+    }
+  },
+  "learning_features": {
+    "positive": [
+      "large low-saturation bright tabletop region",
+      "three elongated green planar markers with dark internal printing",
+      "left-arm self-occlusion mask",
+      "partially clipped wrist/end-effector region"
+    ],
+    "negative_or_absent": [
+      "no visible black thermal-pad base",
+      "no visible grey thermal pad",
+      "no valid pad grasp endpoint can be learned from this frame"
+    ],
+    "usage": "Use this sample for ZED/table/arm self-mask and green-marker appearance only. Do not use it as a positive thermal-pad grasp sample or a 3-D calibration sample."
+  }
+}
