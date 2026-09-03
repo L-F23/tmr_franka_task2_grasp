@@ -1,0 +1,114 @@
+{
+  "status": "released",
+  "requested_backward_m": 0.11,
+  "requested_down_m": 0.01,
+  "gripper_motion": "synchronized_linear_open",
+  "base_commanded": false,
+  "right_arm_commanded": false,
+  "spine_commanded": false,
+  "steps": [
+    {
+      "label": "release_1_of_5",
+      "maximum_joint_error_rad": 0.00026281893752377883,
+      "commanded_gripper_position": 0.63432,
+      "measured_gripper_position": 0.6357171806167402,
+      "gripper_reached_goal": true,
+      "gripper_stalled": false
+    },
+    {
+      "label": "release_2_of_5",
+      "maximum_joint_error_rad": 0.0003229553568133703,
+      "commanded_gripper_position": 0.47574,
+      "measured_gripper_position": 0.48552026431718065,
+      "gripper_reached_goal": true,
+      "gripper_stalled": false
+    },
+    {
+      "label": "release_3_of_5",
+      "maximum_joint_error_rad": 0.00026335215167794246,
+      "commanded_gripper_position": 0.31716000000000005,
+      "measured_gripper_position": 0.31436563876651985,
+      "gripper_reached_goal": true,
+      "gripper_stalled": false
+    },
+    {
+      "label": "release_4_of_5",
+      "maximum_joint_error_rad": 0.00026797772128461794,
+      "commanded_gripper_position": 0.15857999999999994,
+      "measured_gripper_position": 0.15718281938325993,
+      "gripper_reached_goal": true,
+      "gripper_stalled": false
+    },
+    {
+      "label": "release_5_of_5",
+      "maximum_joint_error_rad": 0.00026509952750264354,
+      "commanded_gripper_position": 0.0,
+      "measured_gripper_position": 0.0034929515418502203,
+      "gripper_reached_goal": true,
+      "gripper_stalled": false
+    }
+  ],
+  "before": {
+    "joint_positions_rad": [
+      0.1892722100019455,
+      1.4910670518875122,
+      0.46859028935432434,
+      -1.5750514268875122,
+      2.876291513442993,
+      1.5060514211654663,
+      -1.0670760869979858
+    ],
+    "link8_base_position_m": [
+      0.9884280037672233,
+      -0.050996645131640546,
+      0.8364415939248135
+    ],
+    "link8_base_orientation_xyzw": [
+      -0.47640128330541265,
+      0.5147725809097878,
+      -0.49271829444265214,
+      0.5150530938941693
+    ]
+  },
+  "target_link8_base_position_m": [
+    0.8784280037672233,
+    -0.050996645131640546,
+    0.8264415939248135
+  ],
+  "after": {
+    "joint_positions_rad": [
+      0.1705111563205719,
+      1.5271797180175781,
+      0.4271222651004791,
+      -1.8129397630691528,
+      2.831000328063965,
+      1.243261456489563,
+      -1.1053470373153687
+    ],
+    "link8_base_position_m": [
+      0.8786454483793497,
+      -0.050988222191257405,
+      0.8265465621834528
+    ],
+    "link8_base_orientation_xyzw": [
+      -0.47633391360322247,
+      0.5146484939573173,
+      -0.49278614909373564,
+      0.5151744769301654
+    ],
+    "gripper": {
+      "label": "confirm_fully_open",
+      "action_status": 4,
+      "position": 0.0,
+      "effort": 1.0,
+      "stalled": false,
+      "reached_goal": true
+    },
+    "active_errors": []
+  },
+  "actual_delta_m": [
+    -0.10978255538787363,
+    8.422940383140398e-06,
+    -0.00989503174136075
+  ]
+}

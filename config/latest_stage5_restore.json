@@ -1,0 +1,39 @@
+{
+  "status": "success",
+  "action_status": 4,
+  "action_succeeded": true,
+  "collision_checked_samples": 40,
+  "start_joint_positions_rad": [
+    0.17052623629570007,
+    1.5273070335388184,
+    0.42714810371398926,
+    -1.812963843345642,
+    2.8309857845306396,
+    1.2433111667633057,
+    -1.1053440570831299
+  ],
+  "target_joint_positions_rad": [
+    -1.71976900100708,
+    -1.6329213380813599,
+    1.8240526914596558,
+    -2.447446823120117,
+    2.177191972732544,
+    0.8496646285057068,
+    -3.05077862739563
+  ],
+  "measured_joint_positions_rad": [
+    -1.7199633121490479,
+    -1.6331443786621094,
+    1.8241043090820312,
+    -2.4475557804107666,
+    2.177306890487671,
+    0.8497834801673889,
+    -3.050679922103882
+  ],
+  "maximum_joint_error_rad": 0.00022304058074951172,
+  "final_gripper_position": 0.0,
+  "base_commanded": false,
+  "spine_commanded": false,
+  "right_arm_commanded": false,
+  "active_errors": []
+}
