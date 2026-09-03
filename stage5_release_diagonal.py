@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-"""Retract/down the left link8 while opening the gripper in synchronized steps."""
+"""Retract/down the left link8 completely, then open the gripper."""
 
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
-import time
 
 import numpy as np
 import rclpy
-from action_msgs.msg import GoalStatus
-from control_msgs.action import GripperCommand
-from franka_msgs.action import PTPMotion
 
 from execute_thermal_pad_grasp import ThermalPadExecutor
 from set_stage1_start_from_current import wait_motion_inputs
@@ -28,79 +24,25 @@ def release_target(position, backward_m: float, down_m: float) -> np.ndarray:
     )
 
 
-class SynchronizedRelease(ThermalPadExecutor):
-    def move_and_open(
-        self, joints: list[float], gripper_position: float, label: str, speed: float
-    ) -> dict:
+class OrderedRelease(ThermalPadExecutor):
+    def retract_then_open(
+        self, plan: list[dict], speed: float, opened_position: float
+    ) -> tuple[list[dict], dict]:
+        """Verify every arm waypoint before issuing the only open command."""
+        motions = []
+        for index, waypoint in enumerate(plan, 1):
+            motions.append(self.move_ptp(
+                waypoint["joint_positions_rad"],
+                f"retract_and_down_{index}_of_{len(plan)}",
+                speed,
+            ))
         self.motion_gate()
-        arm_goal = PTPMotion.Goal()
-        arm_goal.goal_joint_configuration = list(map(float, joints))
-        arm_goal.maximum_joint_velocities = [float(speed)] * 7
-        arm_goal.goal_tolerance = 0.006
-        gripper_goal = GripperCommand.Goal()
-        gripper_goal.command.position = float(gripper_position)
-        gripper_goal.command.max_effort = 1.0
-
-        arm_send = self.ptp_client.send_goal_async(arm_goal)
-        gripper_send = self.gripper_client.send_goal_async(gripper_goal)
-        deadline = time.monotonic() + 8.0
-        while (
-            (not arm_send.done() or not gripper_send.done())
-            and time.monotonic() < deadline
-        ):
-            rclpy.spin_once(self, timeout_sec=0.03)
-        arm_handle = arm_send.result() if arm_send.done() else None
-        gripper_handle = gripper_send.result() if gripper_send.done() else None
-        if arm_handle is None or not arm_handle.accepted:
-            raise RuntimeError(f"{label} arm goal rejected")
-        if gripper_handle is None or not gripper_handle.accepted:
-            self.cancel(arm_handle)
-            raise RuntimeError(f"{label} gripper goal rejected")
-
-        arm_result = arm_handle.get_result_async()
-        gripper_result = gripper_handle.get_result_async()
-        deadline = time.monotonic() + 35.0
-        while (
-            (not arm_result.done() or not gripper_result.done())
-            and time.monotonic() < deadline
-        ):
-            rclpy.spin_once(self, timeout_sec=0.03)
-            self.motion_gate(arm_handle)
-        if not arm_result.done():
-            self.cancel(arm_handle)
-            raise RuntimeError(f"{label} arm timeout")
-        if not gripper_result.done():
-            self.cancel(gripper_handle)
-            raise RuntimeError(f"{label} gripper timeout")
-        arm_wrapped = arm_result.result()
-        gripper_wrapped = gripper_result.result()
-        if arm_wrapped is None or arm_wrapped.status != GoalStatus.STATUS_SUCCEEDED:
-            raise RuntimeError(
-                f"{label} arm failed with status "
-                f"{getattr(arm_wrapped, 'status', None)}"
-            )
-        if gripper_wrapped is None or gripper_wrapped.status != GoalStatus.STATUS_SUCCEEDED:
-            raise RuntimeError(
-                f"{label} gripper failed with status "
-                f"{getattr(gripper_wrapped, 'status', None)}"
-            )
-        settle = time.monotonic() + 0.20
-        while time.monotonic() < settle:
-            rclpy.spin_once(self, timeout_sec=0.03)
-        endpoint_error = float(np.max(
-            np.abs(np.asarray(self.joints, dtype=float) - np.asarray(joints, dtype=float))
-        ))
-        if endpoint_error > 0.012:
-            raise RuntimeError(f"{label} joint endpoint error {endpoint_error:.6f} rad")
-        grip = gripper_wrapped.result
-        return {
-            "label": label,
-            "maximum_joint_error_rad": endpoint_error,
-            "commanded_gripper_position": float(gripper_position),
-            "measured_gripper_position": float(grip.position),
-            "gripper_reached_goal": bool(grip.reached_goal),
-            "gripper_stalled": bool(grip.stalled),
-        }
+        gripper = self.command_gripper(
+            opened_position, "open_after_arm_motion_complete"
+        )
+        if not gripper["reached_goal"]:
+            raise RuntimeError("left gripper did not reach the fully open position")
+        return motions, gripper
 
 
 def main() -> int:
@@ -121,17 +63,17 @@ def main() -> int:
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
     rclpy.init()
-    node = SynchronizedRelease(config)
+    node = OrderedRelease(config)
     node.isolated_base_zero_locked = True
     report = {
         "status": "starting",
         "requested_backward_m": args.backward_m,
         "requested_down_m": args.down_m,
-        "gripper_motion": "synchronized_linear_open",
+        "gripper_motion": "open_only_after_arm_motion_complete",
         "base_commanded": False,
         "right_arm_commanded": False,
         "spine_commanded": False,
-        "steps": [],
+        "motions": [],
     }
     code = 2
     try:
@@ -160,18 +102,10 @@ def main() -> int:
             "link8_base_orientation_xyzw": orientation,
         }
         report["target_link8_base_position_m"] = target.tolist()
-        closed = float(config["empty_cycle"]["closed_position"])
         opened = float(config["empty_cycle"]["open_position"])
-        for index, waypoint in enumerate(plan, 1):
-            fraction = index / len(plan)
-            gripper_position = closed + fraction * (opened - closed)
-            report["steps"].append(node.move_and_open(
-                waypoint["joint_positions_rad"],
-                gripper_position,
-                f"release_{index}_of_{len(plan)}",
-                args.speed_rad_s,
-            ))
-        final_gripper = node.command_gripper(opened, "confirm_fully_open")
+        report["motions"], final_gripper = node.retract_then_open(
+            plan, args.speed_rad_s, opened
+        )
         after_pose = node.fk(node.joints)
         after_position, after_orientation = pose_values(after_pose)
         report["after"] = {

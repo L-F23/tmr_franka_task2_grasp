@@ -6,7 +6,7 @@ from colored_pad_detector import (
     detect_colored_pads,
     map_layout_to_distances,
 )
-from stage3_red_pad_alignment import split_lateral_move
+from base_motion import split_lateral_move
 
 
 def synthetic_layout():

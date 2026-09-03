@@ -120,6 +120,12 @@ def detect_occluded_grey_pad(image: np.ndarray) -> Target | None:
         ratio = max(w / max(h, 1), h / max(w, 1))
         if area < 500 or not 2.5 <= ratio <= 6.5:
             continue
+        margin = 35
+        y0, y1 = max(0, y-margin), min(height, y+h+margin)
+        x0, x1 = max(0, x-margin), min(width, x+w+margin)
+        dark_fraction = float(np.mean(value[y0:y1, x0:x1] < 45))
+        if dark_fraction < 0.12:
+            continue
         moments = cv2.moments(contour)
         center = (moments["m10"] / moments["m00"], moments["m01"] / moments["m00"])
         choices.append(Target(center, (x, y, w, h), area, min(1.0, .65 + area / 12000)))

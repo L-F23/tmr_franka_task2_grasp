@@ -6,12 +6,12 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import subprocess
 import time
 
 import cv2
 import numpy as np
 
+from base_motion import guarded_move_right, split_lateral_move
 from colored_pad_detector import (
     annotate,
     best_red_wrist_target,
@@ -22,15 +22,6 @@ from colored_pad_detector import (
 
 ROOT = Path(__file__).resolve().parent
 VIEWER = "http://127.0.0.1:18081"
-BASE_HOST = "tmr-user@172.16.0.50"
-REMOTE_MOVER = "/home/tmr-user/tmr_cycle/scripts/guarded_lateral_step.py"
-BASE_ENV = (
-    "source /opt/ros/humble/setup.bash >/dev/null 2>&1; "
-    "source /home/tmr-user/ros2_ws/install/setup.bash >/dev/null 2>&1 || true; "
-    "export ROS_DOMAIN_ID=97 ROS_LOCALHOST_ONLY=1 "
-    "RMW_IMPLEMENTATION=rmw_cyclonedds_cpp "
-    "CYCLONEDDS_URI=file:///home/tmr-user/cyclonedds.xml"
-)
 KNOWN_DISTANCES_CM = [19.5, 32.9, 44.6, 58.0]
 
 
@@ -43,40 +34,8 @@ def frame(camera: str) -> np.ndarray:
     return image
 
 
-def split_lateral_move(distance_m: float, maximum_step_m: float = 0.08) -> list[float]:
-    if abs(distance_m) < 1e-9:
-        return []
-    direction = 1.0 if distance_m > 0.0 else -1.0
-    remaining = abs(float(distance_m))
-    steps = []
-    while remaining > maximum_step_m:
-        steps.append(direction * maximum_step_m)
-        remaining -= maximum_step_m
-    if remaining >= 0.008:
-        steps.append(direction * remaining)
-    elif steps:
-        steps[-1] += direction * remaining
-    else:
-        steps.append(direction * 0.008)
-    return steps
-
-
 def move_right(distance_m: float) -> dict:
-    command = (
-        f"{BASE_ENV}; python3 {REMOTE_MOVER} --right-m {distance_m:.6f} "
-        "--speed-mps 0.02 --timeout-s 15"
-    )
-    completed = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", BASE_HOST, command],
-        check=False, text=True, capture_output=True,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"guarded base step failed: {completed.stdout.strip()} "
-            f"{completed.stderr.strip()}"
-        )
-    start = completed.stdout.find("{")
-    return json.loads(completed.stdout[start:])
+    return guarded_move_right(distance_m)
 
 
 def observe_wrist(center_tolerance_px: float) -> dict:

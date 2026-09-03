@@ -2,12 +2,14 @@ import cv2
 import numpy as np
 
 from alignment_detector import (
+    Target,
     detect_main_hint,
     detect_occluded_grey_pad,
     detect_target,
     horizontal_decision,
     wrist_vertical_robot_decision,
 )
+from align_to_thermal_pad import main_table_target
 
 
 def test_detects_grey_pad_on_black_base_and_requests_right():
@@ -57,3 +59,16 @@ def test_detects_pad_when_black_base_merges_with_gripper():
     target = detect_occluded_grey_pad(image)
     assert target is not None
     assert 250 < target.center[1] < 275
+
+
+def test_occluded_fallback_rejects_grey_strip_without_black_base():
+    image = np.full((480, 640, 3), 170, np.uint8)
+    cv2.rectangle(image, (440, 230), (610, 270), (90, 90, 90), -1)
+    assert detect_occluded_grey_pad(image) is None
+
+
+def test_main_target_rejects_candidate_above_table_band(monkeypatch):
+    image = np.full((720, 1280, 3), 170, np.uint8)
+    candidate = Target((300.0, 70.0), (220, 20, 160, 120), 12000.0, 0.8)
+    monkeypatch.setattr("align_to_thermal_pad.detect_target", lambda _: candidate)
+    assert main_table_target(image) is None
