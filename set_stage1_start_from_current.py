@@ -19,11 +19,11 @@ from thermal_pad_ik import DEFAULT_CONFIG, ROOT, pose_values
 DEFAULT_RECORD = ROOT / "config" / "latest_stage1_start.json"
 
 
-def offset_targets(position, backward_m: float, down_m: float):
+def offset_targets(position, backward_m: float, down_m: float, forward_m: float = 0.0):
     start = np.asarray(position, dtype=float)
-    backward = start + np.array([-float(backward_m), 0.0, 0.0])
-    lowered = backward + np.array([0.0, 0.0, -float(down_m)])
-    return backward, lowered
+    after_x = start + np.array([float(forward_m) - float(backward_m), 0.0, 0.0])
+    lowered = after_x + np.array([0.0, 0.0, -float(down_m)])
+    return after_x, lowered
 
 
 def wait_motion_inputs(node: ThermalPadExecutor, timeout_s: float = 10.0) -> None:
@@ -61,14 +61,17 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
     parser.add_argument("--backward-m", type=float, default=0.06)
+    parser.add_argument("--forward-m", type=float, default=0.0)
     parser.add_argument("--down-m", type=float, default=0.055)
     parser.add_argument("--speed-rad-s", type=float, default=0.012)
     args = parser.parse_args()
     if not args.execute:
         parser.error("--execute is required for physical motion")
-    if args.backward_m < 0.0 or args.down_m < 0.0:
+    if args.backward_m < 0.0 or args.forward_m < 0.0 or args.down_m < 0.0:
         parser.error("offset distances must be non-negative")
-    if args.backward_m == 0.0 and args.down_m == 0.0:
+    if args.backward_m > 0.0 and args.forward_m > 0.0:
+        parser.error("choose either --backward-m or --forward-m")
+    if args.backward_m == 0.0 and args.forward_m == 0.0 and args.down_m == 0.0:
         parser.error("at least one offset distance must be positive")
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
@@ -79,6 +82,7 @@ def main() -> int:
         "status": "starting",
         "coordinate_frame": config["kinematics"]["frame"],
         "requested_backward_m": args.backward_m,
+        "requested_forward_m": args.forward_m,
         "requested_down_m": args.down_m,
         "base_commanded": False,
         "right_arm_commanded": False,
@@ -95,23 +99,27 @@ def main() -> int:
 
         start_position = np.asarray(report["before"]["link8_base_position_m"], dtype=float)
         orientation = report["before"]["link8_base_orientation_xyzw"]
-        backward, lowered = offset_targets(start_position, args.backward_m, args.down_m)
-        back_plan, seed = [], list(node.joints)
-        if args.backward_m > 0.0:
-            back_plan, seed = node.solve_cartesian_segment(
-                "stage1_start_backward", start_position, backward, orientation, seed
+        after_x, lowered = offset_targets(
+            start_position, args.backward_m, args.down_m, args.forward_m
+        )
+        x_plan, seed = [], list(node.joints)
+        if args.backward_m > 0.0 or args.forward_m > 0.0:
+            direction = "forward" if args.forward_m > 0.0 else "backward"
+            x_plan, seed = node.solve_cartesian_segment(
+                f"stage1_start_{direction}", start_position, after_x, orientation, seed
             )
         down_plan = []
         if args.down_m > 0.0:
             down_plan, _ = node.solve_cartesian_segment(
-                "stage1_start_down", backward, lowered, orientation, seed
+                "stage1_start_down", after_x, lowered, orientation, seed
             )
         report["planned_targets"] = {
-            "after_backward_m": backward.tolist(),
+            "after_x_translation_m": after_x.tolist(),
             "after_down_m": lowered.tolist(),
             "orientation_xyzw": orientation,
         }
-        for label, plan in (("backward", back_plan), ("down", down_plan)):
+        x_label = "forward" if args.forward_m > 0.0 else "backward"
+        for label, plan in ((x_label, x_plan), ("down", down_plan)):
             for waypoint in plan:
                 report["motions"].append(node.move_ptp(
                     waypoint["joint_positions_rad"],

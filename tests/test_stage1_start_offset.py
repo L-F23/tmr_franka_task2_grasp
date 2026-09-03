@@ -13,3 +13,9 @@ def test_offset_targets_allow_a_single_axis_move():
     backward, lowered = offset_targets([0.8, -0.1, 0.9], 0.03, 0.0)
     assert np.allclose(backward, [0.77, -0.1, 0.9])
     assert np.allclose(lowered, backward)
+
+
+def test_offset_targets_allow_forward_motion():
+    forward, lowered = offset_targets([0.8, -0.1, 0.9], 0.0, 0.0, 0.025)
+    assert np.allclose(forward, [0.825, -0.1, 0.9])
+    assert np.allclose(lowered, forward)
