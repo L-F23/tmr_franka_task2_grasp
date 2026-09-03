@@ -1,0 +1,26 @@
+{
+  "recorded_at": "2026-09-03T11:24:35+08:00",
+  "camera_health": {
+    "main": true,
+    "left_wrist": true
+  },
+  "main_camera": {
+    "target_visible": true,
+    "target_center_px": [606.2383, 404.0922],
+    "image_size_px": [1280, 720],
+    "confidence": 1.0
+  },
+  "left_wrist_camera": {
+    "target_visible": true,
+    "target_center_px": [596.5412, 188.3112],
+    "image_size_px": [640, 480],
+    "confidence": 0.8806,
+    "decision": "move_right"
+  },
+  "execution": {
+    "requested": true,
+    "motion_commanded": false,
+    "result": "blocked_by_dual_radar_safety_gate",
+    "missing_topics": ["/lidar_front/scan", "/lidar_rear/scan"]
+  }
+}

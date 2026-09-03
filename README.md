@@ -49,3 +49,19 @@ http://172.16.0.50:18082/tmr_zed_latest.jpg
 ```
 
 检测采用 HSV 红色双区间、形态学去噪和旋转矩形几何约束，能处理红色色相在 HSV 0/179 边界两侧的情况。HTTP 输入会检查 `Last-Modified`，不会把重复下载的旧 JPEG 当作新帧。
+
+## 黑色底座与灰色导热垫横向对准
+
+只观察并输出决策：
+
+```bash
+/usr/bin/python3 align_to_thermal_pad.py
+```
+
+允许实际横移：
+
+```bash
+/usr/bin/python3 align_to_thermal_pad.py --execute
+```
+
+程序优先使用左腕画面闭环居中；腕部未见目标时用主摄提供搜索方向。每步横移默认仅 `0.02 m`，双雷达任一路无新鲜数据时禁止运动并以零运动退出。
