@@ -250,7 +250,8 @@ def main() -> int:
             python_command(
                 "stage5_release_diagonal.py", "--execute",
                 "--backward-m", "0.11", "--initial-down-m", "0.008",
-                "--down-m", "0.007", "--maximum-contact-drop-m", "0.015",
+                "--down-m", "0.062", "--pre-open-contact-drop-m", "0.015",
+                "--maximum-contact-drop-m", "0.07",
                 "--tilt-down-deg", "90", "--open-after-m", "0.06",
                 "--speed-rad-s", "0.05",
             ),

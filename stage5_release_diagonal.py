@@ -106,26 +106,31 @@ def main() -> int:
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
     parser.add_argument("--backward-m", type=float, default=0.11)
     parser.add_argument("--initial-down-m", type=float, default=0.008)
-    parser.add_argument("--down-m", type=float, default=0.007)
+    parser.add_argument("--down-m", type=float, default=0.062)
     parser.add_argument("--tilt-down-deg", type=float, default=90.0)
     parser.add_argument("--open-after-m", type=float, default=0.06)
-    parser.add_argument("--maximum-contact-drop-m", type=float, default=0.015)
+    parser.add_argument("--pre-open-contact-drop-m", type=float, default=0.015)
+    parser.add_argument("--maximum-contact-drop-m", type=float, default=0.07)
     parser.add_argument("--speed-rad-s", type=float, default=0.05)
     args = parser.parse_args()
     if not args.execute:
         parser.error("--execute is required for physical motion")
     if not 0.10 <= args.backward_m <= 0.12:
         parser.error("--backward-m must be in [0.10, 0.12]")
-    if not 0.0 <= args.down_m <= 0.01:
-        parser.error("--down-m must be in [0, 0.01]")
+    if not 0.0 <= args.down_m <= 0.07:
+        parser.error("--down-m must be in [0, 0.07]")
     if not 0.0 < args.initial_down_m <= 0.01:
         parser.error("--initial-down-m must be in (0, 0.01]")
     if not 1.0 <= args.tilt_down_deg <= 90.0:
         parser.error("--tilt-down-deg must be in [1, 90]")
     if not 0.04 <= args.open_after_m < args.backward_m:
         parser.error("--open-after-m must be in [0.04, backward-m)")
-    if not 0.008 <= args.maximum_contact_drop_m <= 0.02:
-        parser.error("--maximum-contact-drop-m must be in [0.008, 0.02]")
+    if not args.initial_down_m <= args.pre_open_contact_drop_m <= 0.025:
+        parser.error("--pre-open-contact-drop-m must be between initial-down and 0.025")
+    if not args.pre_open_contact_drop_m <= args.maximum_contact_drop_m <= 0.08:
+        parser.error("--maximum-contact-drop-m must be between pre-open drop and 0.08")
+    if args.initial_down_m + args.down_m > args.maximum_contact_drop_m + 1e-9:
+        parser.error("initial-down-m + down-m cannot exceed maximum-contact-drop-m")
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
     rclpy.init()
@@ -142,6 +147,7 @@ def main() -> int:
         "tilt_begins_at_retreat_fraction": 0.0,
         "tilt_down_deg": args.tilt_down_deg,
         "maximum_finger_contact_drop_m": args.maximum_contact_drop_m,
+        "pre_open_finger_contact_drop_m": args.pre_open_contact_drop_m,
         "clearance_guard": "link8 z is raised as needed to keep the finger contact end above its start-relative floor",
         "base_commanded": False,
         "right_arm_commanded": False,
@@ -171,7 +177,6 @@ def main() -> int:
         ).tolist()
         contact_local = np.asarray(config["grasp"]["link8_to_finger_contact_local_m"], dtype=float)
         start_contact = np.asarray(start_position) + quaternion_matrix(orientation) @ contact_local
-        minimum_contact_z = float(start_contact[2]) - args.maximum_contact_drop_m
         plan, seed = node.solve_pose_segment(
             "release_initial_down_8mm",
             np.asarray(start_position, dtype=float), lowered_start,
@@ -180,12 +185,23 @@ def main() -> int:
         previous_position = np.asarray(lowered_start, dtype=float)
         previous_orientation = np.asarray(orientation, dtype=float)
         clearance_compensations = []
+        allowed_contact_drops = []
+        open_fraction = args.open_after_m / args.backward_m
         # Ten milestones make translation and the 90-degree dump simultaneous.
         for index, fraction in enumerate(np.linspace(0.1, 1.0, 10), 1):
             raw_position = np.asarray(lowered_start) + fraction * (
                 np.asarray(raw_target) - np.asarray(lowered_start)
             )
             milestone_orientation = slerp(orientation, tilted_orientation, float(fraction))
+            if fraction <= open_fraction:
+                allowed_drop = args.initial_down_m + (
+                    args.pre_open_contact_drop_m - args.initial_down_m
+                ) * float(fraction) / open_fraction
+            else:
+                allowed_drop = args.pre_open_contact_drop_m + (
+                    args.maximum_contact_drop_m - args.pre_open_contact_drop_m
+                ) * (float(fraction) - open_fraction) / (1.0 - open_fraction)
+            minimum_contact_z = float(start_contact[2]) - allowed_drop
             milestone_position, compensation = clearance_compensated_position(
                 raw_position, milestone_orientation, contact_local, minimum_contact_z
             )
@@ -196,6 +212,7 @@ def main() -> int:
             )
             plan.extend(segment)
             clearance_compensations.append(float(compensation))
+            allowed_contact_drops.append(float(allowed_drop))
             previous_position = milestone_position
             previous_orientation = milestone_orientation
         report["before"] = {
@@ -207,7 +224,8 @@ def main() -> int:
         report["initial_lowered_link8_base_position_m"] = lowered_start.tolist()
         report["target_link8_base_position_m"] = previous_position.tolist()
         report["target_link8_base_orientation_xyzw"] = tilted_orientation
-        report["minimum_finger_contact_base_z_m"] = minimum_contact_z
+        report["final_minimum_finger_contact_base_z_m"] = minimum_contact_z
+        report["allowed_contact_drop_by_milestone_m"] = allowed_contact_drops
         report["clearance_compensation_by_milestone_m"] = clearance_compensations
         report["planned_waypoint_count"] = len(plan)
         opened = float(config["empty_cycle"]["open_position"])
