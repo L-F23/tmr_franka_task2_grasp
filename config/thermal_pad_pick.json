@@ -40,6 +40,8 @@
     "avoid_collisions": true,
     "ik_timeout_s": 1.0,
     "maximum_joint_step_rad": 0.22,
+    "maximum_orientation_step_deg": 5.0,
+    "path_samples_between_waypoints": 4,
     "path_samples_per_segment": 40
   },
   "hand_eye": {
@@ -60,6 +62,28 @@
     "lift_clearance_base_z_m": 0.1,
     "workspace_contact_min_m": [0.45, -0.55, 0.59],
     "workspace_contact_max_m": [1.15, 0.55, 1.10]
+  },
+  "motion_sequence": {
+    "coordinate_semantics": "ground-aligned robot frame: +X forward/far, -X inward, +Z up; never use FCI shoulder-local axes",
+    "ground_aligned_frame": "base",
+    "shoulder_frame": "left_fr3v2_link0",
+    "ground_forward_axis_xyz": [1.0, 0.0, 0.0],
+    "open_advance_m": 0.06,
+    "staging_clearance_z_m": 0.08,
+    "lift_vertical_m": 0.22,
+    "carry_far_m": 0.12,
+    "pre_place_lower_m": 0.02,
+    "diagonal_down_m": 0.08,
+    "diagonal_inward_m": 0.06,
+    "release_inward_m": 0.05,
+    "release_forward_tilt_deg": 25.0,
+    "maximum_tool_vertical_error_deg": 5.0,
+    "parameters_calibrated": false,
+    "unvalidated_assumptions": [
+      "open advance distance 0.06 m",
+      "diagonal placement down/inward distances 0.08/0.06 m",
+      "release inward distance 0.05 m and forward tilt 25 deg"
+    ]
   },
   "initial_joints_rad": [-1.71976900100708, -1.6329213380813599, 1.8240526914596558, -2.447446823120117, 2.177191972732544, 0.8496646285057068, -3.05077862739563],
   "initial_joint_tolerance_rad": 0.025

@@ -36,6 +36,7 @@ from thermal_pad_geometry import (
     register_depth_point,
     transform_point,
 )
+from thermal_pad_sequence import build_sequence, slerp
 
 
 ROOT = Path(__file__).resolve().parent
@@ -271,26 +272,52 @@ class ThermalPadPlanner(Node):
         contacts = [[c.contact_body_1, c.contact_body_2] for c in response.contacts]
         return bool(response.valid), contacts
 
-    def solve_cartesian_segment(self, label, start_position, target_position, quaternion, seed):
+    def solve_pose_segment(
+        self, label, start_position, target_position,
+        start_quaternion, target_quaternion, seed,
+    ):
         distance = float(np.linalg.norm(target_position - start_position))
-        steps = max(2, int(math.ceil(distance / 0.025)))
+        orientation_distance = quaternion_angle_deg(start_quaternion, target_quaternion)
+        steps = max(
+            2,
+            int(math.ceil(distance / 0.025)),
+            int(math.ceil(
+                orientation_distance
+                / float(self.cfg["kinematics"]["maximum_orientation_step_deg"])
+            )),
+        )
         result, previous = [], list(seed)
-        for index, position in enumerate(interpolate(start_position, target_position, steps), 1):
+        positions = interpolate(start_position, target_position, steps)
+        for index, position in enumerate(positions, 1):
+            quaternion = slerp(start_quaternion, target_quaternion, index / steps).tolist()
             solution = self.ik(position, quaternion, previous)
             joint_step = max(abs(a - b) for a, b in zip(solution, previous))
             if joint_step > self.cfg["kinematics"]["maximum_joint_step_rad"]:
                 raise PlanningError(f"{label} IK discontinuity {joint_step:.6f} rad")
-            valid, contacts = self.state_valid(solution)
-            if not valid:
-                raise PlanningError(f"{label} waypoint {index} collides: {contacts}")
+            interpolation_samples = self.cfg["kinematics"]["path_samples_between_waypoints"]
+            for subindex, interpolated in enumerate(
+                interpolate(np.asarray(previous), np.asarray(solution), interpolation_samples), 1
+            ):
+                valid, contacts = self.state_valid(interpolated.tolist())
+                if not valid:
+                    raise PlanningError(
+                        f"{label} waypoint {index}.{subindex} collides: {contacts}"
+                    )
             result.append({
                 "index": index,
                 "position_m": position.tolist(),
+                "orientation_xyzw": quaternion,
                 "joint_positions_rad": solution,
                 "maximum_joint_step_rad": joint_step,
+                "collision_checked_interpolation_samples": interpolation_samples,
             })
             previous = solution
         return result, previous
+
+    def solve_cartesian_segment(self, label, start_position, target_position, quaternion, seed):
+        return self.solve_pose_segment(
+            label, start_position, target_position, quaternion, quaternion, seed
+        )
 
     def validate_joint_segment(self, label, start, target):
         invalid = []
@@ -318,6 +345,11 @@ class ThermalPadPlanner(Node):
         visual = self.cfg["visual_gate"]
         if visual["center_axis"] != "y":
             raise PlanningError("only the calibrated wrist Y-axis gate is supported")
+        sequence_cfg = self.cfg["motion_sequence"]
+        if sequence_cfg["ground_aligned_frame"] != self.cfg["kinematics"]["frame"]:
+            raise PlanningError("motion sequence frame differs from the MoveIt planning frame")
+        if sequence_cfg["shoulder_frame"] != self.cfg["kinematics"]["arm_mount_link"]:
+            raise PlanningError("configured shoulder frame differs from the live arm mount frame")
 
         def intrinsics(info):
             projection = info.p if info.p[0] else info.k
@@ -439,20 +471,28 @@ class ThermalPadPlanner(Node):
         rotation = base_from_parent[:3, :3]
         link8_to_contact = rotation @ np.asarray(grasp_cfg["link8_to_finger_contact_local_m"])
         grasp_position = point_base + np.array([0.0, 0.0, grasp_cfg["contact_clearance_base_z_m"]]) - link8_to_contact
-        pregrasp_position = grasp_position + np.array([0.0, 0.0, grasp_cfg["pregrasp_clearance_base_z_m"]])
-        lift_position = grasp_position + np.array([0.0, 0.0, grasp_cfg["lift_clearance_base_z_m"]])
         current_position = np.asarray(fk_position)
-
-        approach, q_pre = self.solve_cartesian_segment(
-            "approach", current_position, pregrasp_position, fk_quaternion, self.joints
+        # grasp_position and fk_quaternion are in the ground-aligned whole-robot
+        # planning frame. Never apply the following offsets to the FCI pose,
+        # whose origin and axes are local to the left shoulder.
+        sequence = build_sequence(grasp_position, fk_quaternion, sequence_cfg)
+        sequence_plans = {}
+        previous_position = current_position
+        previous_orientation = fk_quaternion
+        previous_joints = list(self.joints)
+        for target in sequence["targets"]:
+            target_position = np.asarray(target["position_m"], dtype=float)
+            target_orientation = target["orientation_xyzw"]
+            segment, previous_joints = self.solve_pose_segment(
+                target["name"], previous_position, target_position,
+                previous_orientation, target_orientation, previous_joints,
+            )
+            sequence_plans[target["name"]] = segment
+            previous_position = target_position
+            previous_orientation = target_orientation
+        return_checks = self.validate_joint_segment(
+            "return_to_initial", previous_joints, initial.tolist()
         )
-        descend, q_grasp = self.solve_cartesian_segment(
-            "descend", pregrasp_position, grasp_position, fk_quaternion, q_pre
-        )
-        lift, q_lift = self.solve_cartesian_segment(
-            "lift", grasp_position, lift_position, fk_quaternion, q_grasp
-        )
-        return_checks = self.validate_joint_segment("return_to_initial", q_lift, initial.tolist())
 
         if annotated_output is not None:
             annotated_output.parent.mkdir(parents=True, exist_ok=True)
@@ -484,12 +524,11 @@ class ThermalPadPlanner(Node):
                 "comparison": "MoveIt base->link8 versus live mount->measured_EE with configured flange offset",
             },
             "poses": {
-                "pregrasp_link8_position_m": pregrasp_position.tolist(),
                 "grasp_link8_position_m": grasp_position.tolist(),
-                "lift_link8_position_m": lift_position.tolist(),
-                "orientation_xyzw": fk_quaternion,
+                "pick_orientation_xyzw": fk_quaternion,
             },
-            "plans": {"approach": approach, "descend": descend, "lift": lift},
+            "motion_sequence": sequence,
+            "plans": sequence_plans,
             "return_to_initial": {
                 "target_joint_positions_rad": initial.tolist(),
                 "collision_checked_samples": return_checks,
