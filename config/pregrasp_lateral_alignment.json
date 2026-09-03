@@ -5,6 +5,7 @@
   "main_reference_image": "captures/grasp_lateral_reference_20260904/aligned_main.jpg",
   "wrist_template_bbox_xywh": [300, 220, 145, 195],
   "wrist_reference_top_y_px": 220,
+  "wrist_reference_center_y_px": 240,
   "wrist_deadband_px": 20,
   "minimum_wrist_match_confidence": 0.60,
   "main_reference_red_x_px": 785.0,

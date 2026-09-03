@@ -3,8 +3,8 @@ import cv2
 from pregrasp_lateral_alignment import (
     main_guidance,
     wrist_decision,
-    wrist_template_match,
 )
+from alignment_detector import detect_occluded_grey_pad, detect_target
 
 
 CONFIG = {
@@ -19,11 +19,10 @@ def test_operator_verified_wrist_direction_mapping():
     assert wrist_decision(225, 220, 20) == "aligned"
 
 
-def test_aligned_reference_matches_its_mandatory_gate():
+def test_legacy_reference_is_rejected_as_a_structured_target():
     image = cv2.imread(CONFIG["wrist_reference_image"])
-    result = wrist_template_match(image, CONFIG)
-    assert result["confidence"] > 0.99
-    assert wrist_decision(result["top_left_px"][1], 220, 20) == "aligned"
+    assert detect_target(image) is None
+    assert detect_occluded_grey_pad(image) is None
 
 
 def test_main_reference_guides_from_red_pad_displacement():

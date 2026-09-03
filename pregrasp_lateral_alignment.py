@@ -13,6 +13,7 @@ import numpy as np
 import rclpy
 
 from base_motion import guarded_move_right
+from alignment_detector import detect_occluded_grey_pad, detect_target
 from colored_pad_detector import detect_colored_pads
 from execute_thermal_pad_grasp import ThermalPadExecutor
 from thermal_pad_ik import DEFAULT_CONFIG, ROOT
@@ -109,6 +110,7 @@ def main() -> int:
     report = {
         "status": "blocked",
         "semantics": "grasp-pose wrist-above=>base-right; wrist-below=>base-left; main fallback",
+        "wrist_gate": "structured black-base plus grey-pad detection; template matches cannot command motion",
         "base_steps": [],
         "history": [],
         "right_arm_commanded": False,
@@ -120,12 +122,12 @@ def main() -> int:
         consecutive = 0
         for _ in range(int(config["maximum_steps"])):
             wrist = frame("left")
-            match = wrist_template_match(wrist, config)
-            if match["confidence"] >= float(config["minimum_wrist_match_confidence"]):
-                match_top_y = float(match["top_left_px"][1])
+            target = detect_target(wrist) or detect_occluded_grey_pad(wrist)
+            if target is not None:
+                target_center_y = float(target.center[1])
                 decision = wrist_decision(
-                    match_top_y,
-                    config["wrist_reference_top_y_px"],
+                    target_center_y,
+                    config["wrist_reference_center_y_px"],
                     config["wrist_deadband_px"],
                 )
                 state = {
@@ -135,10 +137,17 @@ def main() -> int:
                         "aligned" if decision == "aligned"
                         else ("above" if decision == "move_right" else "below")
                     ),
-                    "match": match,
+                    "structured_target": {
+                        "center_px": list(target.center),
+                        "base_box_xywh": list(target.base_box),
+                        "confidence": target.confidence,
+                    },
                 }
             else:
-                state = {"source": "main", "wrist_match": match}
+                state = {
+                    "source": "main",
+                    "wrist_structured_target_visible": False,
+                }
                 state.update(main_guidance(
                     frame("main"),
                     config["main_reference_red_x_px"],
