@@ -56,3 +56,36 @@ def test_clearance_compensation_prevents_contact_end_drop():
     contact_z = (position + np.array([0.155, 0.0, 0.0]))[2]
     assert contact_z >= 0.79 - 1e-9
     assert compensation == 0.0
+
+
+def test_open_result_accepts_measured_zero_even_if_action_flag_is_false(monkeypatch):
+    monkeypatch.setattr(
+        "stage5_release_diagonal.rclpy.spin_until_future_complete",
+        lambda *args, **kwargs: None,
+    )
+    class Result:
+        position = 0.0
+        effort = 1.0
+        stalled = False
+        reached_goal = False
+
+    class Wrapped:
+        status = 6
+        result = Result()
+
+    class Future:
+        def done(self):
+            return True
+
+        def result(self):
+            return Wrapped()
+
+    class Handle:
+        def get_result_async(self):
+            return Future()
+
+    class Fake:
+        requested_open_position = 0.0
+
+    report = OrderedRelease.finish_opening(Fake(), Handle())
+    assert report["measured_open_position_accepted"] is True

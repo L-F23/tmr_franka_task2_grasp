@@ -39,6 +39,7 @@ def clearance_compensated_position(
 
 class OrderedRelease(ThermalPadExecutor):
     def begin_opening(self, opened_position: float):
+        self.requested_open_position = float(opened_position)
         goal = GripperCommand.Goal()
         goal.command.position = float(opened_position)
         goal.command.max_effort = 1.0
@@ -65,7 +66,10 @@ class OrderedRelease(ThermalPadExecutor):
             "stalled": bool(result.stalled),
             "reached_goal": bool(result.reached_goal),
         }
-        if not report["reached_goal"]:
+        report["measured_open_position_accepted"] = (
+            report["position"] <= float(getattr(self, "requested_open_position", 0.0)) + 0.02
+        )
+        if not (report["reached_goal"] or report["measured_open_position_accepted"]):
             raise RuntimeError("left gripper did not reach the fully open position")
         return report
 
