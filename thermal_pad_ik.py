@@ -36,7 +36,12 @@ from thermal_pad_geometry import (
     register_depth_point,
     transform_point,
 )
-from thermal_pad_sequence import build_sequence, slerp
+from thermal_pad_sequence import (
+    build_sequence,
+    horizontal_gripper_orientation,
+    quaternion_matrix,
+    slerp,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -468,14 +473,15 @@ class ThermalPadPlanner(Node):
         if not np.all((point_base >= lower) & (point_base <= upper)):
             raise PlanningError(f"3-D contact outside workspace: {point_base.tolist()}")
 
-        rotation = base_from_parent[:3, :3]
+        pick_orientation = horizontal_gripper_orientation(sequence_cfg).tolist()
+        rotation = quaternion_matrix(pick_orientation)
         link8_to_contact = rotation @ np.asarray(grasp_cfg["link8_to_finger_contact_local_m"])
         grasp_position = point_base + np.array([0.0, 0.0, grasp_cfg["contact_clearance_base_z_m"]]) - link8_to_contact
         current_position = np.asarray(fk_position)
         # grasp_position and fk_quaternion are in the ground-aligned whole-robot
         # planning frame. Never apply the following offsets to the FCI pose,
         # whose origin and axes are local to the left shoulder.
-        sequence = build_sequence(grasp_position, fk_quaternion, sequence_cfg)
+        sequence = build_sequence(grasp_position, sequence_cfg)
         sequence_plans = {}
         previous_position = current_position
         previous_orientation = fk_quaternion
@@ -525,7 +531,7 @@ class ThermalPadPlanner(Node):
             },
             "poses": {
                 "grasp_link8_position_m": grasp_position.tolist(),
-                "pick_orientation_xyzw": fk_quaternion,
+                "pick_orientation_xyzw": pick_orientation,
             },
             "motion_sequence": sequence,
             "plans": sequence_plans,

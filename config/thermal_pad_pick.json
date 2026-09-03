@@ -68,6 +68,9 @@
     "ground_aligned_frame": "base",
     "shoulder_frame": "left_fr3v2_link0",
     "ground_forward_axis_xyz": [1.0, 0.0, 0.0],
+    "ground_up_axis_xyz": [0.0, 0.0, 1.0],
+    "link8_gripper_approach_axis_local_xyz": [0.0, 0.0, 1.0],
+    "link8_gripper_opening_axis_local_xyz": [0.0, -1.0, 0.0],
     "segment_boundary_after_step": 6,
     "segment_1_terminal_target": "carry_far_12cm",
     "open_advance_m": 0.06,
@@ -78,13 +81,12 @@
     "diagonal_down_m": 0.08,
     "diagonal_inward_m": 0.06,
     "release_inward_m": 0.05,
-    "release_forward_tilt_deg": 25.0,
-    "maximum_tool_vertical_error_deg": 5.0,
+    "dump_toward_ground_deg": 15.0,
     "parameters_calibrated": false,
     "unvalidated_assumptions": [
       "open advance distance 0.06 m",
       "diagonal placement down/inward distances 0.08/0.06 m",
-      "release inward distance 0.05 m and finger-axis-forward tilt 25 deg"
+      "release inward distance 0.05 m and bucket-dump rotation toward ground 15 deg"
     ]
   },
   "initial_joints_rad": [-1.71976900100708, -1.6329213380813599, 1.8240526914596558, -2.447446823120117, 2.177191972732544, 0.8496646285057068, -3.05077862739563],

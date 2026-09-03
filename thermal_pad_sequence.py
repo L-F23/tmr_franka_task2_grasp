@@ -55,6 +55,51 @@ def quaternion_matrix(quaternion) -> np.ndarray:
     ])
 
 
+def matrix_quaternion(matrix) -> np.ndarray:
+    """Convert a proper 3x3 rotation matrix to an XYZW quaternion."""
+    matrix = np.asarray(matrix, dtype=float)
+    if matrix.shape != (3, 3) or not np.all(np.isfinite(matrix)):
+        raise SequenceDesignError("orientation matrix must be finite 3x3")
+    if not np.allclose(matrix.T @ matrix, np.eye(3), atol=1e-7) or np.linalg.det(matrix) < 0.999999:
+        raise SequenceDesignError("orientation matrix must be a proper rotation")
+    trace = float(np.trace(matrix))
+    if trace > 0.0:
+        scale = math.sqrt(trace + 1.0) * 2.0
+        quaternion = [
+            (matrix[2, 1] - matrix[1, 2]) / scale,
+            (matrix[0, 2] - matrix[2, 0]) / scale,
+            (matrix[1, 0] - matrix[0, 1]) / scale,
+            0.25 * scale,
+        ]
+    else:
+        index = int(np.argmax(np.diag(matrix)))
+        if index == 0:
+            scale = math.sqrt(1.0 + matrix[0, 0] - matrix[1, 1] - matrix[2, 2]) * 2.0
+            quaternion = [
+                0.25 * scale,
+                (matrix[0, 1] + matrix[1, 0]) / scale,
+                (matrix[0, 2] + matrix[2, 0]) / scale,
+                (matrix[2, 1] - matrix[1, 2]) / scale,
+            ]
+        elif index == 1:
+            scale = math.sqrt(1.0 + matrix[1, 1] - matrix[0, 0] - matrix[2, 2]) * 2.0
+            quaternion = [
+                (matrix[0, 1] + matrix[1, 0]) / scale,
+                0.25 * scale,
+                (matrix[1, 2] + matrix[2, 1]) / scale,
+                (matrix[0, 2] - matrix[2, 0]) / scale,
+            ]
+        else:
+            scale = math.sqrt(1.0 + matrix[2, 2] - matrix[0, 0] - matrix[1, 1]) * 2.0
+            quaternion = [
+                (matrix[0, 2] + matrix[2, 0]) / scale,
+                (matrix[1, 2] + matrix[2, 1]) / scale,
+                0.25 * scale,
+                (matrix[1, 0] - matrix[0, 1]) / scale,
+            ]
+    return normalize_quaternion(quaternion)
+
+
 def slerp(start, target, fraction: float) -> np.ndarray:
     start = normalize_quaternion(start)
     target = normalize_quaternion(target)
@@ -73,31 +118,49 @@ def slerp(start, target, fraction: float) -> np.ndarray:
     )
 
 
-def tool_down_axis(quaternion) -> np.ndarray:
-    """Return link8 local +Z expressed in the robot base frame."""
-    return quaternion_matrix(quaternion)[:, 2]
+def transformed_axis(quaternion, local_axis) -> np.ndarray:
+    return quaternion_matrix(quaternion) @ _unit(local_axis, "local tool axis")
 
 
-def tilt_tool_toward(quaternion, direction, angle_deg: float) -> np.ndarray:
-    """Tilt the tool-down axis toward a base-frame horizontal direction."""
+def tilt_axis_toward(quaternion, local_axis, direction, angle_deg: float) -> np.ndarray:
+    """Rotate a selected tool axis toward a ground-frame direction."""
     direction = _unit(direction, "tilt direction")
-    down = tool_down_axis(quaternion)
-    horizontal = direction - np.dot(direction, down) * down
-    horizontal = _unit(horizontal, "tilt direction projected normal to tool axis")
-    target_down = math.cos(math.radians(angle_deg)) * down + math.sin(
+    selected = transformed_axis(quaternion, local_axis)
+    normal_component = direction - np.dot(direction, selected) * selected
+    normal_component = _unit(normal_component, "tilt direction projected normal to tool axis")
+    target = math.cos(math.radians(angle_deg)) * selected + math.sin(
         math.radians(angle_deg)
-    ) * horizontal
-    axis = _unit(np.cross(down, target_down), "tilt rotation axis")
+    ) * normal_component
+    axis = _unit(np.cross(selected, target), "tilt rotation axis")
     rotation = axis_angle_quaternion(axis, math.radians(angle_deg))
     return quaternion_multiply(rotation, quaternion)
 
 
-def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
+def horizontal_gripper_orientation(config: dict) -> np.ndarray:
+    """Map gripper approach to ground forward and jaw opening to ground up."""
+    local_approach = _unit(config["link8_gripper_approach_axis_local_xyz"], "local approach axis")
+    local_opening = _unit(config["link8_gripper_opening_axis_local_xyz"], "local opening axis")
+    ground_approach = _unit(config["ground_forward_axis_xyz"], "ground-frame forward axis")
+    ground_opening = _unit(config["ground_up_axis_xyz"], "ground-frame up axis")
+    if abs(float(np.dot(local_approach, local_opening))) > 1e-6:
+        raise SequenceDesignError("local gripper approach and opening axes must be orthogonal")
+    if abs(float(np.dot(ground_approach, ground_opening))) > 1e-6:
+        raise SequenceDesignError("ground-frame forward and up axes must be orthogonal")
+    local_basis = np.column_stack((
+        local_approach, local_opening, np.cross(local_approach, local_opening)
+    ))
+    ground_basis = np.column_stack((
+        ground_approach, ground_opening, np.cross(ground_approach, ground_opening)
+    ))
+    return matrix_quaternion(ground_basis @ local_basis.T)
+
+
+def build_sequence(grasp_position, config: dict) -> dict:
     """Build named pose targets and gripper events without solving IK or moving hardware."""
     grasp = np.asarray(grasp_position, dtype=float)
     if grasp.shape != (3,) or not np.all(np.isfinite(grasp)):
         raise SequenceDesignError("grasp position must be finite XYZ")
-    orientation = normalize_quaternion(vertical_orientation)
+    orientation = horizontal_gripper_orientation(config)
     reference_frame = str(config["ground_aligned_frame"])
     shoulder_frame = str(config["shoulder_frame"])
     if not reference_frame or not shoulder_frame or reference_frame == shoulder_frame:
@@ -109,20 +172,14 @@ def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
     if config.get("segment_1_terminal_target") != "carry_far_12cm":
         raise SequenceDesignError("segment 1 must terminate at carry_far_12cm")
     forward = _unit(config["ground_forward_axis_xyz"], "ground-frame forward axis")
-    up = np.array([0.0, 0.0, 1.0])
+    up = _unit(config["ground_up_axis_xyz"], "ground-frame up axis")
     if abs(float(np.dot(forward, up))) > 1e-6:
         raise SequenceDesignError("ground-frame forward axis must be horizontal")
-
-    vertical_error = math.degrees(math.acos(float(np.clip(np.dot(tool_down_axis(orientation), -up), -1, 1))))
-    if vertical_error > float(config["maximum_tool_vertical_error_deg"]):
-        raise SequenceDesignError(
-            f"gripper is not vertical to the table ({vertical_error:.2f} deg error)"
-        )
 
     positive = (
         "open_advance_m", "staging_clearance_z_m", "lift_vertical_m",
         "carry_far_m", "pre_place_lower_m", "diagonal_down_m",
-        "diagonal_inward_m", "release_inward_m", "release_forward_tilt_deg",
+        "diagonal_inward_m", "release_inward_m", "dump_toward_ground_deg",
     )
     if any(float(config[name]) <= 0.0 for name in positive):
         raise SequenceDesignError("all configured sequence distances and angles must be positive")
@@ -138,8 +195,17 @@ def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
         - forward * float(config["diagonal_inward_m"])
     )
     release = diagonal - forward * float(config["release_inward_m"])
-    release_orientation = tilt_tool_toward(
-        orientation, forward, float(config["release_forward_tilt_deg"])
+    release_orientation = tilt_axis_toward(
+        orientation,
+        config["link8_gripper_approach_axis_local_xyz"],
+        -up,
+        float(config["dump_toward_ground_deg"]),
+    )
+    approach_axis = transformed_axis(
+        orientation, config["link8_gripper_approach_axis_local_xyz"]
+    )
+    opening_axis = transformed_axis(
+        orientation, config["link8_gripper_opening_axis_local_xyz"]
     )
 
     def pose(name, position, segment, step, quaternion=orientation, semantics=""):
@@ -154,7 +220,7 @@ def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
 
     targets = [
         pose("staging_above_pick", staging, 1, 1,
-             semantics="wrist flange horizontal; gripper vertical"),
+             semantics="gripper horizontal; jaw opening axis vertical (one finger above the other)"),
         pose("pick_height_retracted", pick_level, 1, 2,
              semantics="same ground-frame Z as the previously detected grasp endpoint"),
         pose("advance_open_to_pad", grasp, 1, 3,
@@ -166,12 +232,12 @@ def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
         pose("lower_and_retract", diagonal, 2, 8,
              semantics="simultaneous ground-frame -Z and -X translation"),
         pose(
-            "tilt_forward_and_retract_release",
+            "dump_toward_ground_and_retract",
             release,
             2,
             10,
             release_orientation,
-            semantics="simultaneous forward tool tilt and ground-frame -X retraction",
+            semantics="after opening: rotate gripper approach toward ground while retracting in ground-frame -X",
         ),
     ]
     segment_1_names = [target["name"] for target in targets if target["segment"] == 1]
@@ -183,7 +249,10 @@ def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
             "ground-aligned robot frame: +X forward/far, -X inward, +Z up; "
             "FCI shoulder-local axes are never used for these offsets"
         ),
-        "gripper_vertical_error_deg": vertical_error,
+        "horizontal_gripper_orientation_xyzw": orientation.tolist(),
+        "gripper_approach_axis_ground": approach_axis.tolist(),
+        "gripper_opening_axis_ground": opening_axis.tolist(),
+        "gripper_semantics": "approach axis horizontal +X; opening axis +Z, placing fingers one above the other",
         "parameters_calibrated": bool(config.get("parameters_calibrated", False)),
         "execution_ready": bool(config.get("parameters_calibrated", False)),
         "execution_blockers": [] if config.get("parameters_calibrated", False) else [
@@ -215,6 +284,6 @@ def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
             {"step": 6, "after_target": "carry_far_12cm", "command": "hold_and_end_segment_1"},
             {"step": 7, "before_target": "lower_vertical_22cm", "command": "authorize_segment_2"},
             {"step": 9, "after_target": "lower_and_retract", "command": "open_gripper"},
-            {"step": 10, "after_target": "tilt_forward_and_retract_release", "command": "verify_release"},
+            {"step": 10, "after_target": "dump_toward_ground_and_retract", "command": "verify_release"},
         ],
     }

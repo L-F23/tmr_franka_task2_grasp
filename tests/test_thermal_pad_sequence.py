@@ -6,7 +6,7 @@ import pytest
 from thermal_pad_sequence import (
     SequenceDesignError,
     build_sequence,
-    tool_down_axis,
+    transformed_axis,
 )
 
 
@@ -14,6 +14,9 @@ CONFIG = {
     "ground_aligned_frame": "base",
     "shoulder_frame": "left_fr3v2_link0",
     "ground_forward_axis_xyz": [1.0, 0.0, 0.0],
+    "ground_up_axis_xyz": [0.0, 0.0, 1.0],
+    "link8_gripper_approach_axis_local_xyz": [0.0, 0.0, 1.0],
+    "link8_gripper_opening_axis_local_xyz": [0.0, -1.0, 0.0],
     "segment_boundary_after_step": 6,
     "segment_1_terminal_target": "carry_far_12cm",
     "open_advance_m": 0.06,
@@ -24,8 +27,7 @@ CONFIG = {
     "diagonal_down_m": 0.08,
     "diagonal_inward_m": 0.06,
     "release_inward_m": 0.05,
-    "release_forward_tilt_deg": 25.0,
-    "maximum_tool_vertical_error_deg": 5.0,
+    "dump_toward_ground_deg": 15.0,
     "parameters_calibrated": False,
 }
 
@@ -36,9 +38,7 @@ def targets_by_name(sequence):
 
 def test_sequence_preserves_requested_exact_displacements() -> None:
     grasp = np.array([1.0, 0.1, 0.75])
-    # Local tool +Z points down; its flange plane is horizontal to the table.
-    vertical = [1.0, 0.0, 0.0, 0.0]
-    sequence = build_sequence(grasp, vertical, CONFIG)
+    sequence = build_sequence(grasp, CONFIG)
     target = targets_by_name(sequence)
 
     assert np.allclose(target["pick_height_retracted"]["position_m"], [0.94, 0.1, 0.75])
@@ -56,20 +56,40 @@ def test_sequence_preserves_requested_exact_displacements() -> None:
     )
 
 
-def test_release_combines_forward_tilt_and_inward_translation() -> None:
-    sequence = build_sequence([1.0, 0.0, 0.75], [1.0, 0.0, 0.0, 0.0], CONFIG)
+def test_pick_and_transfer_keep_horizontal_gripper_with_vertical_opening_axis() -> None:
+    sequence = build_sequence([1.0, 0.0, 0.75], CONFIG)
+    target = targets_by_name(sequence)
+    for item in sequence["targets"][:-1]:
+        approach = transformed_axis(
+            item["orientation_xyzw"], CONFIG["link8_gripper_approach_axis_local_xyz"]
+        )
+        opening = transformed_axis(
+            item["orientation_xyzw"], CONFIG["link8_gripper_opening_axis_local_xyz"]
+        )
+        assert np.allclose(approach, [1.0, 0.0, 0.0])
+        assert np.allclose(opening, [0.0, 0.0, 1.0])
+
+
+def test_release_opens_then_dumps_toward_ground_while_retracting() -> None:
+    sequence = build_sequence([1.0, 0.0, 0.75], CONFIG)
     target = targets_by_name(sequence)
     diagonal = np.asarray(target["lower_and_retract"]["position_m"])
-    release = np.asarray(target["tilt_forward_and_retract_release"]["position_m"])
+    release_target = target["dump_toward_ground_and_retract"]
+    release = np.asarray(release_target["position_m"])
     assert np.allclose(release - diagonal, [-0.05, 0.0, 0.0])
 
-    release_down = tool_down_axis(target["tilt_forward_and_retract_release"]["orientation_xyzw"])
-    assert release_down[0] == pytest.approx(math.sin(math.radians(25.0)), abs=1e-7)
-    assert release_down[2] == pytest.approx(-math.cos(math.radians(25.0)), abs=1e-7)
+    approach = transformed_axis(
+        release_target["orientation_xyzw"], CONFIG["link8_gripper_approach_axis_local_xyz"]
+    )
+    assert approach[0] == pytest.approx(math.cos(math.radians(15.0)), abs=1e-7)
+    assert approach[2] == pytest.approx(-math.sin(math.radians(15.0)), abs=1e-7)
+    events = sequence["events"]
+    assert events[-2]["command"] == "open_gripper"
+    assert events[-1]["after_target"] == "dump_toward_ground_and_retract"
 
 
 def test_unvalidated_release_parameters_block_execution() -> None:
-    sequence = build_sequence([1.0, 0.0, 0.75], [1.0, 0.0, 0.0, 0.0], CONFIG)
+    sequence = build_sequence([1.0, 0.0, 0.75], CONFIG)
     assert not sequence["execution_ready"]
     assert sequence["execution_blockers"]
     assert [event["command"] for event in sequence["events"]] == [
@@ -80,7 +100,7 @@ def test_unvalidated_release_parameters_block_execution() -> None:
 
 
 def test_sequence_is_split_after_step_six() -> None:
-    sequence = build_sequence([1.0, 0.0, 0.75], [1.0, 0.0, 0.0, 0.0], CONFIG)
+    sequence = build_sequence([1.0, 0.0, 0.75], CONFIG)
     first, second = sequence["segments"]
     assert first["steps"] == [1, 2, 3, 4, 5, 6]
     assert first["terminal_target"] == "carry_far_12cm"
@@ -91,12 +111,13 @@ def test_sequence_is_split_after_step_six() -> None:
     assert all(target["segment"] == 2 for target in sequence["targets"][5:])
 
 
-def test_non_vertical_gripper_is_rejected() -> None:
-    with pytest.raises(SequenceDesignError, match="not vertical"):
-        build_sequence([1.0, 0.0, 0.75], [0.0, 0.0, 0.0, 1.0], CONFIG)
+def test_non_orthogonal_gripper_axes_are_rejected() -> None:
+    invalid = dict(CONFIG, link8_gripper_opening_axis_local_xyz=[0.0, 0.0, 1.0])
+    with pytest.raises(SequenceDesignError, match="must be orthogonal"):
+        build_sequence([1.0, 0.0, 0.75], invalid)
 
 
 def test_shoulder_frame_cannot_be_used_as_ground_reference() -> None:
     invalid = dict(CONFIG, ground_aligned_frame="left_fr3v2_link0")
     with pytest.raises(SequenceDesignError, match="distinct from the arm shoulder"):
-        build_sequence([1.0, 0.0, 0.75], [1.0, 0.0, 0.0, 0.0], invalid)
+        build_sequence([1.0, 0.0, 0.75], invalid)
