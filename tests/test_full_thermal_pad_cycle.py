@@ -7,6 +7,12 @@ def test_full_cycle_places_transport_before_black_base_alignment():
     )
 
 
+def test_isolated_base_runtime_starts_before_transport():
+    assert FULL_STAGE_ORDER.index("isolated_base_runtime_ready") < FULL_STAGE_ORDER.index(
+        "base_right_2m_complete"
+    )
+
+
 def test_release_order_is_move_then_open_then_restore():
     release = FULL_STAGE_ORDER.index(
         "retract_11cm_down_1cm_complete_then_gripper_open"

@@ -18,6 +18,7 @@ DEFAULT_RECORD = ROOT / "config" / "latest_full_thermal_pad_cycle.json"
 FULL_STAGE_ORDER = (
     "left_runtime_ready",
     "left_initial_verified_before_base_transport",
+    "isolated_base_runtime_ready",
     "base_right_2m_complete",
     "black_base_and_thermal_pad_centered",
     "left_pregrasp_reached",
@@ -97,12 +98,22 @@ def main() -> int:
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[1])
 
+        record["stage_results"].append(run(
+            [
+                "ssh", "-o", "BatchMode=yes", "tmr-user@172.16.0.50",
+                "bash /home/tmr-user/tmr_cycle/scripts/19_ensure_navigation_stack.sh",
+            ],
+            "ensure_isolated_base_runtime",
+            150.0,
+        ))
+        record["ordered_stages"].append(FULL_STAGE_ORDER[2])
+
         transport_steps, actual_transport_m = guarded_transport(args.initial_right_m)
         for result in transport_steps:
             record["base_transport_steps"].append(result)
             print(json.dumps({"base_transport_step": result}), flush=True)
         record["actual_initial_right_m"] = actual_transport_m
-        record["ordered_stages"].append(FULL_STAGE_ORDER[2])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[3])
 
         record["stage_results"].append(run(
             python_command(
@@ -113,7 +124,7 @@ def main() -> int:
             "black_base_visual_alignment",
             420.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[3])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[4])
 
         record["stage_results"].append(run(
             python_command(
@@ -125,7 +136,7 @@ def main() -> int:
             "left_pregrasp",
             180.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[4])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[5])
 
         record["stage_results"].append(run(
             python_command(
@@ -137,14 +148,14 @@ def main() -> int:
             "left_grasp_pose",
             60.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[5])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[6])
 
         record["stage_results"].append(run(
             python_command("stage1_close_gripper.py", "--execute"),
             "thermal_pad_grasp",
             60.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[6])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[7])
 
         record["stage_results"].append(run(
             python_command(
@@ -156,7 +167,7 @@ def main() -> int:
             "left_vertical_lift",
             90.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[7])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[8])
 
         record["stage_results"].append(run(
             python_command(
@@ -166,7 +177,7 @@ def main() -> int:
             "red_pad_station_alignment",
             180.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[8])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[9])
 
         record["stage_results"].append(run(
             python_command(
@@ -178,7 +189,7 @@ def main() -> int:
             "placement_approach",
             150.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[9])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[10])
 
         record["stage_results"].append(run(
             python_command(
@@ -188,14 +199,14 @@ def main() -> int:
             "retract_down_then_release",
             120.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[10])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[11])
 
         record["stage_results"].append(run(
             python_command("restore_left_initial_direct.py"),
             "restore_left_initial_after_release",
             150.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[11])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[12])
         record["status"] = "complete"
         code = 0
     except Exception as exc:
