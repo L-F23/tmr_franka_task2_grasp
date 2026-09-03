@@ -1,0 +1,125 @@
+{
+  "status": "relative_motion_complete",
+  "coordinate_frame": "base",
+  "requested_backward_m": 0.0,
+  "requested_forward_m": 0.12,
+  "requested_down_m": 0.12,
+  "requested_up_m": 0.0,
+  "base_commanded": false,
+  "right_arm_commanded": false,
+  "motions": [
+    {
+      "label": "stage1_start_forward_1",
+      "maximum_joint_error_rad": 0.00017050418992195504
+    },
+    {
+      "label": "stage1_start_forward_2",
+      "maximum_joint_error_rad": 0.00020497652035670472
+    },
+    {
+      "label": "stage1_start_forward_3",
+      "maximum_joint_error_rad": 0.00020821681968939687
+    },
+    {
+      "label": "stage1_start_forward_4",
+      "maximum_joint_error_rad": 0.00019566952936656
+    },
+    {
+      "label": "stage1_start_forward_5",
+      "maximum_joint_error_rad": 0.00012093044226224592
+    },
+    {
+      "label": "stage1_start_down_1",
+      "maximum_joint_error_rad": 0.0003190898680909271
+    },
+    {
+      "label": "stage1_start_down_2",
+      "maximum_joint_error_rad": 0.0003060423927301187
+    },
+    {
+      "label": "stage1_start_down_3",
+      "maximum_joint_error_rad": 0.0003135721141293013
+    },
+    {
+      "label": "stage1_start_down_4",
+      "maximum_joint_error_rad": 0.00029391514554855114
+    },
+    {
+      "label": "stage1_start_down_5",
+      "maximum_joint_error_rad": 0.00025622040065129137
+    }
+  ],
+  "before": {
+    "recorded_unix_s": 1788452555.9828823,
+    "joint_positions_rad": [
+      0.04281974956393242,
+      1.2115494012832642,
+      0.3207351565361023,
+      -2.185060739517212,
+      2.813411235809326,
+      1.1766587495803833,
+      -0.9964900612831116
+    ],
+    "link8_base_position_m": [
+      0.8682259902320032,
+      -0.05093314812287416,
+      0.9562047699128916
+    ],
+    "link8_base_orientation_xyzw": [
+      -0.4764656440676524,
+      0.5149576852054408,
+      -0.4926024330507574,
+      0.5149193290443903
+    ],
+    "spine_position_m": 0.6,
+    "active_errors": []
+  },
+  "planned_targets": {
+    "after_x_translation_m": [
+      0.9882259902320032,
+      -0.05093314812287416,
+      0.9562047699128916
+    ],
+    "after_z_translation_m": [
+      0.9882259902320032,
+      -0.05093314812287416,
+      0.8362047699128916
+    ],
+    "orientation_xyzw": [
+      -0.4764656440676524,
+      0.5149576852054408,
+      -0.4926024330507574,
+      0.5149193290443903
+    ]
+  },
+  "after": {
+    "recorded_unix_s": 1788452629.2996023,
+    "joint_positions_rad": [
+      0.18928472697734833,
+      1.4910794496536255,
+      0.4685972332954407,
+      -1.5750501155853271,
+      2.876288652420044,
+      1.5060536861419678,
+      -1.067076563835144
+    ],
+    "link8_base_position_m": [
+      0.9884248832393937,
+      -0.05098875880674264,
+      0.8364332834162305
+    ],
+    "link8_base_orientation_xyzw": [
+      -0.47640337701884494,
+      0.5147770830016863,
+      -0.4927093424895581,
+      0.5150552213159504
+    ],
+    "spine_position_m": 0.6,
+    "active_errors": []
+  },
+  "recommended_retracted_link8_position_m": [
+    0.9884248832393937,
+    -0.05098875880674264,
+    0.8364332834162305
+  ]
+}

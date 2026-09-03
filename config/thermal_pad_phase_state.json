@@ -38,5 +38,30 @@
     "wrist_role": "advisory_only",
     "wrist_table_view_available": false,
     "terminal_behavior": "base_stopped_waiting_for_next_stage"
+  },
+  "stage_4": {
+    "status": "place_approach_complete",
+    "action_order": [
+      "left_link8_forward_12cm",
+      "left_link8_down_12cm"
+    ],
+    "requested_forward_m": 0.12,
+    "actual_forward_m": 0.1201988930073905,
+    "requested_down_m": 0.12,
+    "actual_down_m": 0.1197714864966611,
+    "joint_positions_rad": [
+      0.18928472697734833,
+      1.4910794496536255,
+      0.4685972332954407,
+      -1.5750501155853271,
+      2.876288652420044,
+      1.5060536861419678,
+      -1.067076563835144
+    ],
+    "gripper_position": 0.7894070484581498,
+    "base_commanded": false,
+    "spine_commanded": false,
+    "right_arm_commanded": false,
+    "active_errors": []
   }
 }
