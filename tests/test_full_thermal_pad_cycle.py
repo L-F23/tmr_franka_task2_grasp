@@ -21,9 +21,11 @@ def test_grasp_pose_requires_lateral_confirmation_before_closing():
     assert aligned + 1 == closed
 
 
-def test_release_order_is_halfway_tilt_open_then_restore():
+def test_release_order_has_clearance_before_restore():
     release = FULL_STAGE_ORDER.index(
-        "retract_halfway_then_tilt_and_open_until_complete"
+        "retract_and_tilt_immediately_open_at_6cm_then_continue"
     )
+    clearance = FULL_STAGE_ORDER.index("post_release_vertical_clearance_5cm")
     restore = FULL_STAGE_ORDER.index("left_initial_restored")
-    assert release + 1 == restore
+    assert release + 1 == clearance
+    assert clearance + 1 == restore

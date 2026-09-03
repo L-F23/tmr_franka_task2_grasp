@@ -1,6 +1,6 @@
 import numpy as np
 
-from stage5_release_diagonal import OrderedRelease, release_target
+from stage5_release_diagonal import clearance_compensated_position, OrderedRelease, release_target
 
 
 def test_release_target_moves_backward_and_down_together():
@@ -8,7 +8,7 @@ def test_release_target_moves_backward_and_down_together():
     assert np.allclose(target, [0.89, 0.1, 0.79])
 
 
-def test_gripper_begins_at_halfway_and_finishes_after_arm():
+def test_gripper_begins_at_6cm_and_arm_keeps_retracting():
     events = []
 
     class FakeExecutor:
@@ -27,15 +27,32 @@ def test_gripper_begins_at_halfway_and_finishes_after_arm():
             events.append(("gripper_finish", handle))
             return {"reached_goal": True}
 
-    first_half = [{"joint_positions_rad": [0.1] * 7}]
-    second_half = [{"joint_positions_rad": [0.2] * 7}]
-    motions, gripper = OrderedRelease.retract_tilt_and_open(
-        FakeExecutor(), first_half, second_half, 0.012, 0.0
+    plan = [
+        {"joint_positions_rad": [0.1] * 7, "position_m": [0.95, 0.0, 0.8]},
+        {"joint_positions_rad": [0.2] * 7, "position_m": [0.94, 0.0, 0.8]},
+        {"joint_positions_rad": [0.3] * 7, "position_m": [0.89, 0.0, 0.8]},
+    ]
+    progress = []
+    gripper = OrderedRelease.retract_tilt_and_open(
+        FakeExecutor(), plan, 1.0, 0.06, 0.05, 0.0,
+        lambda kind, value: progress.append((kind, value)),
     )
 
     assert [event[0] for event in events] == [
-        "arm", "gate", "gripper_start", "arm", "gate", "gripper_finish"
+        "arm", "arm", "gate", "gripper_start", "arm", "gate", "gripper_finish"
     ]
-    assert len(motions) == 2
     assert gripper["reached_goal"] is True
-    assert events[2] == ("gripper_start", 0.0)
+    assert events[3] == ("gripper_start", 0.0)
+    assert [kind for kind, _ in progress] == [
+        "motion", "motion", "gripper_started", "motion", "gripper_finished"
+    ]
+
+
+def test_clearance_compensation_prevents_contact_end_drop():
+    position, compensation = clearance_compensated_position(
+        [0.9, 0.0, 0.80], [0.0, 0.70710678, 0.0, 0.70710678],
+        [0.0, 0.0, 0.155], 0.79,
+    )
+    contact_z = (position + np.array([0.155, 0.0, 0.0]))[2]
+    assert contact_z >= 0.79 - 1e-9
+    assert compensation == 0.0

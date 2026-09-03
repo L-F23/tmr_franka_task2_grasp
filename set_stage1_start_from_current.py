@@ -67,7 +67,8 @@ def main() -> int:
     parser.add_argument("--forward-m", type=float, default=0.0)
     parser.add_argument("--down-m", type=float, default=0.055)
     parser.add_argument("--up-m", type=float, default=0.0)
-    parser.add_argument("--speed-rad-s", type=float, default=0.012)
+    parser.add_argument("--speed-rad-s", type=float, default=0.05)
+    parser.add_argument("--fast", action="store_true")
     args = parser.parse_args()
     if not args.execute:
         parser.error("--execute is required for physical motion")
@@ -86,6 +87,7 @@ def main() -> int:
     config = json.loads(args.config.read_text(encoding="utf-8"))
     rclpy.init()
     node = ThermalPadExecutor(config)
+    node.fast_execution = bool(args.fast)
     node.isolated_base_zero_locked = True
     report = {
         "status": "starting",

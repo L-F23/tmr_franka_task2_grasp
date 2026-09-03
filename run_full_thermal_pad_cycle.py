@@ -30,7 +30,8 @@ FULL_STAGE_ORDER = (
     "left_arm_lifted_12cm",
     "red_pad_station_reached",
     "placement_forward_12cm_down_12cm_complete",
-    "retract_halfway_then_tilt_and_open_until_complete",
+    "retract_and_tilt_immediately_open_at_6cm_then_continue",
+    "post_release_vertical_clearance_5cm",
     "left_initial_restored",
 )
 
@@ -178,6 +179,7 @@ def main() -> int:
                 "set_stage1_start_from_current.py",
                 "--execute", "--backward-m", "0", "--forward-m", "0.025",
                 "--down-m", "0", "--up-m", "0",
+                "--speed-rad-s", "0.05", "--fast",
                 "--record", str(ROOT / "config" / "latest_stage1_start.json"),
             ),
             "left_grasp_pose",
@@ -204,6 +206,7 @@ def main() -> int:
                 "set_stage1_start_from_current.py",
                 "--execute", "--backward-m", "0", "--forward-m", "0",
                 "--down-m", "0", "--up-m", "0.12",
+                "--speed-rad-s", "0.05", "--fast",
                 "--record", str(ROOT / "config" / "latest_stage2_lift.json"),
             ),
             "left_vertical_lift",
@@ -226,6 +229,7 @@ def main() -> int:
                 "set_stage1_start_from_current.py",
                 "--execute", "--backward-m", "0", "--forward-m", "0.12",
                 "--down-m", "0.12", "--up-m", "0",
+                "--speed-rad-s", "0.05", "--fast",
                 "--record", str(ROOT / "config" / "latest_stage4_place_approach.json"),
             ),
             "placement_approach",
@@ -236,7 +240,9 @@ def main() -> int:
         record["stage_results"].append(run(
             python_command(
                 "stage5_release_diagonal.py", "--execute",
-                "--backward-m", "0.11", "--down-m", "0.01",
+                "--backward-m", "0.11", "--down-m", "0.003",
+                "--tilt-down-deg", "90", "--open-after-m", "0.06",
+                "--speed-rad-s", "0.05",
             ),
             "retract_down_then_release",
             120.0,
@@ -244,11 +250,24 @@ def main() -> int:
         record["ordered_stages"].append(FULL_STAGE_ORDER[13])
 
         record["stage_results"].append(run(
+            python_command(
+                "set_stage1_start_from_current.py",
+                "--execute", "--backward-m", "0", "--forward-m", "0",
+                "--down-m", "0", "--up-m", "0.05",
+                "--speed-rad-s", "0.05", "--fast",
+                "--record", str(ROOT / "config" / "latest_post_release_clearance.json"),
+            ),
+            "post_release_vertical_clearance",
+            90.0,
+        ))
+        record["ordered_stages"].append(FULL_STAGE_ORDER[14])
+
+        record["stage_results"].append(run(
             python_command("restore_left_initial_direct.py"),
             "restore_left_initial_after_release",
             150.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[14])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[15])
         record["status"] = "complete"
         code = 0
     except Exception as exc:

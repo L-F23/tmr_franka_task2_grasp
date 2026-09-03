@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Retract/down link8; after halfway tilt down and open while finishing."""
+"""Continuously retract and dump the tool, opening near 6 cm retreat."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from control_msgs.action import GripperCommand
 from execute_thermal_pad_grasp import ThermalPadExecutor
 from set_stage1_start_from_current import wait_motion_inputs
 from thermal_pad_ik import DEFAULT_CONFIG, ROOT, pose_values
-from thermal_pad_sequence import tilt_axis_toward
+from thermal_pad_sequence import quaternion_matrix, slerp, tilt_axis_toward
 
 
 DEFAULT_RECORD = ROOT / "config" / "latest_stage5_release.json"
@@ -24,6 +24,17 @@ def release_target(position, backward_m: float, down_m: float) -> np.ndarray:
     return np.asarray(position, dtype=float) + np.array(
         [-float(backward_m), 0.0, -float(down_m)]
     )
+
+
+def clearance_compensated_position(
+    raw_link8_position, orientation, contact_local, minimum_contact_z: float,
+) -> tuple[np.ndarray, float]:
+    """Raise link8 only as needed so the finger-contact end clears the table."""
+    position = np.asarray(raw_link8_position, dtype=float).copy()
+    contact = position + quaternion_matrix(orientation) @ np.asarray(contact_local, dtype=float)
+    compensation = max(0.0, float(minimum_contact_z) - float(contact[2]))
+    position[2] += compensation
+    return position, compensation
 
 
 class OrderedRelease(ThermalPadExecutor):
@@ -59,32 +70,29 @@ class OrderedRelease(ThermalPadExecutor):
         return report
 
     def retract_tilt_and_open(
-        self,
-        first_half: list[dict],
-        second_half: list[dict],
-        speed: float,
-        opened_position: float,
-    ) -> tuple[list[dict], dict]:
-        """At 50% retreat, begin downward tilt and asynchronous gripper opening."""
-        motions = []
-        plan = first_half + second_half
-        for index, waypoint in enumerate(first_half, 1):
-            motions.append(self.move_ptp(
+        self, plan: list[dict], start_x: float, open_after_m: float,
+        speed: float, opened_position: float, progress,
+    ) -> dict:
+        """Tilt from the first waypoint, open at 6 cm, then keep retracting."""
+        gripper_handle = None
+        for index, waypoint in enumerate(plan, 1):
+            result = self.move_ptp(
                 waypoint["joint_positions_rad"],
-                f"retract_and_down_{index}_of_{len(plan)}",
+                f"retract_dump_{index}_of_{len(plan)}",
                 speed,
-            ))
-        self.motion_gate()
-        gripper_handle = self.begin_opening(opened_position)
-        for index, waypoint in enumerate(second_half, len(first_half) + 1):
-            motions.append(self.move_ptp(
-                waypoint["joint_positions_rad"],
-                f"retract_tilt_and_open_{index}_of_{len(plan)}",
-                speed,
-            ))
+            )
+            retreat = float(start_x) - float(waypoint["position_m"][0])
+            progress("motion", {**result, "retreat_m": retreat})
+            if gripper_handle is None and retreat >= float(open_after_m) - 1e-6:
+                self.motion_gate()
+                gripper_handle = self.begin_opening(opened_position)
+                progress("gripper_started", {"retreat_m": retreat})
+        if gripper_handle is None:
+            raise RuntimeError("release plan never reached the gripper-open distance")
         self.motion_gate()
         gripper = self.finish_opening(gripper_handle)
-        return motions, gripper
+        progress("gripper_finished", gripper)
+        return gripper
 
 
 def main() -> int:
@@ -93,30 +101,40 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
     parser.add_argument("--backward-m", type=float, default=0.11)
-    parser.add_argument("--down-m", type=float, default=0.01)
-    parser.add_argument("--tilt-down-deg", type=float, default=8.0)
-    parser.add_argument("--speed-rad-s", type=float, default=0.012)
+    parser.add_argument("--down-m", type=float, default=0.003)
+    parser.add_argument("--tilt-down-deg", type=float, default=90.0)
+    parser.add_argument("--open-after-m", type=float, default=0.06)
+    parser.add_argument("--maximum-contact-drop-m", type=float, default=0.003)
+    parser.add_argument("--speed-rad-s", type=float, default=0.05)
     args = parser.parse_args()
     if not args.execute:
         parser.error("--execute is required for physical motion")
     if not 0.10 <= args.backward_m <= 0.12:
         parser.error("--backward-m must be in [0.10, 0.12]")
-    if not 0.0 < args.down_m <= 0.01:
-        parser.error("--down-m must be in (0, 0.01]")
-    if not 1.0 <= args.tilt_down_deg <= 12.0:
-        parser.error("--tilt-down-deg must be in [1, 12]")
+    if not 0.0 <= args.down_m <= 0.01:
+        parser.error("--down-m must be in [0, 0.01]")
+    if not 1.0 <= args.tilt_down_deg <= 90.0:
+        parser.error("--tilt-down-deg must be in [1, 90]")
+    if not 0.04 <= args.open_after_m < args.backward_m:
+        parser.error("--open-after-m must be in [0.04, backward-m)")
+    if not 0.0 <= args.maximum_contact_drop_m <= 0.01:
+        parser.error("--maximum-contact-drop-m must be in [0, 0.01]")
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
     rclpy.init()
     node = OrderedRelease(config)
+    node.fast_execution = True
     node.isolated_base_zero_locked = True
     report = {
         "status": "starting",
         "requested_backward_m": args.backward_m,
         "requested_down_m": args.down_m,
-        "gripper_motion": "begin_opening_at_halfway; fully_open_at_completion",
-        "tilt_begins_at_retreat_fraction": 0.5,
+        "gripper_motion": "begin_opening_near_6cm; continue_retracting_while_opening",
+        "open_after_retreat_m": args.open_after_m,
+        "tilt_begins_at_retreat_fraction": 0.0,
         "tilt_down_deg": args.tilt_down_deg,
+        "maximum_finger_contact_drop_m": args.maximum_contact_drop_m,
+        "clearance_guard": "link8 z is raised as needed to keep the finger contact end above its start-relative floor",
         "base_commanded": False,
         "right_arm_commanded": False,
         "spine_commanded": False,
@@ -134,10 +152,7 @@ def main() -> int:
             raise RuntimeError("Franka errors: " + ",".join(errors))
         start_pose = node.fk(node.joints)
         start_position, orientation = pose_values(start_pose)
-        target = release_target(start_position, args.backward_m, args.down_m)
-        midpoint = release_target(
-            start_position, args.backward_m * 0.5, args.down_m * 0.5
-        )
+        raw_target = release_target(start_position, args.backward_m, args.down_m)
         motion = config["motion_sequence"]
         tilted_orientation = tilt_axis_toward(
             orientation,
@@ -145,33 +160,54 @@ def main() -> int:
             -np.asarray(motion["ground_up_axis_xyz"], dtype=float),
             args.tilt_down_deg,
         ).tolist()
-        first_half, seed = node.solve_pose_segment(
-            "release_first_half_level",
-            np.asarray(start_position, dtype=float),
-            midpoint,
-            orientation,
-            orientation,
-            node.joints,
-        )
-        second_half, _ = node.solve_pose_segment(
-            "release_second_half_tilt_and_open",
-            midpoint,
-            target,
-            orientation,
-            tilted_orientation,
-            seed,
-        )
+        contact_local = np.asarray(config["grasp"]["link8_to_finger_contact_local_m"], dtype=float)
+        start_contact = np.asarray(start_position) + quaternion_matrix(orientation) @ contact_local
+        minimum_contact_z = float(start_contact[2]) - args.maximum_contact_drop_m
+        plan, seed = [], list(node.joints)
+        previous_position = np.asarray(start_position, dtype=float)
+        previous_orientation = np.asarray(orientation, dtype=float)
+        clearance_compensations = []
+        # Ten milestones make translation and the 90-degree dump simultaneous.
+        for index, fraction in enumerate(np.linspace(0.1, 1.0, 10), 1):
+            raw_position = np.asarray(start_position) + fraction * (
+                np.asarray(raw_target) - np.asarray(start_position)
+            )
+            milestone_orientation = slerp(orientation, tilted_orientation, float(fraction))
+            milestone_position, compensation = clearance_compensated_position(
+                raw_position, milestone_orientation, contact_local, minimum_contact_z
+            )
+            segment, seed = node.solve_pose_segment(
+                f"release_dump_{index}_of_10",
+                previous_position, milestone_position,
+                previous_orientation, milestone_orientation, seed,
+            )
+            plan.extend(segment)
+            clearance_compensations.append(float(compensation))
+            previous_position = milestone_position
+            previous_orientation = milestone_orientation
         report["before"] = {
             "joint_positions_rad": list(node.joints),
             "link8_base_position_m": start_position,
             "link8_base_orientation_xyzw": orientation,
         }
-        report["target_link8_base_position_m"] = target.tolist()
-        report["halfway_link8_base_position_m"] = midpoint.tolist()
+        report["raw_target_link8_base_position_m"] = raw_target.tolist()
+        report["target_link8_base_position_m"] = previous_position.tolist()
         report["target_link8_base_orientation_xyzw"] = tilted_orientation
+        report["minimum_finger_contact_base_z_m"] = minimum_contact_z
+        report["clearance_compensation_by_milestone_m"] = clearance_compensations
+        report["planned_waypoint_count"] = len(plan)
         opened = float(config["empty_cycle"]["open_position"])
-        report["motions"], final_gripper = node.retract_tilt_and_open(
-            first_half, second_half, args.speed_rad_s, opened
+        def progress(kind, value):
+            if kind == "motion":
+                report["motions"].append(value)
+            else:
+                report[kind] = value
+            args.record.parent.mkdir(parents=True, exist_ok=True)
+            args.record.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+        final_gripper = node.retract_tilt_and_open(
+            plan, float(start_position[0]), args.open_after_m,
+            args.speed_rad_s, opened, progress,
         )
         after_pose = node.fk(node.joints)
         after_position, after_orientation = pose_values(after_pose)
@@ -190,6 +226,7 @@ def main() -> int:
     except Exception as exc:
         report["status"] = "blocked"
         report["error"] = str(exc)
+        report["resume_requires_fresh_current_pose_replan"] = True
     finally:
         args.record.parent.mkdir(parents=True, exist_ok=True)
         args.record.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

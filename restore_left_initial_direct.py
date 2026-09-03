@@ -55,7 +55,7 @@ class DirectRestore(Node):
             raise RuntimeError("left PTP action unavailable")
         goal = PTPMotion.Goal()
         goal.goal_joint_configuration = TARGET
-        goal.maximum_joint_velocities = [0.04] * 7
+        goal.maximum_joint_velocities = [0.05] * 7
         goal.goal_tolerance = 0.004
         future = self.action.send_goal_async(goal)
         rclpy.spin_until_future_complete(self, future, timeout_sec=8.0)
