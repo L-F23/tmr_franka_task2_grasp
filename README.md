@@ -1,6 +1,8 @@
 # TMR Franka Task 2 — Red Strip Detection
 
-从移动操作机器人主摄 ZED-M 的实时 JPEG 中检测桌面红色条状标签。程序只读取图像，不发送底盘、机械臂或夹爪命令。
+从移动操作机器人主摄 ZED-M 的实时 JPEG 中检测桌面红色条状标签。
+
+正式入口会先松开左夹爪、将 Spine 调到 `0.600 m`、仅复位左臂并验证误差，然后记录实测状态。初始化不向右臂发送任何命令；任一步失败都会中止启动。
 
 ## 安装
 
@@ -15,8 +17,10 @@ pip install -r requirements.txt
 ## 一行命令
 
 ```bash
-/usr/bin/python3 detect_red_strip.py --annotated-output outputs/red_strip.jpg
+cd /home/aup/tmr_franka_task2_grasp && /usr/bin/python3 start_project.py --annotated-output outputs/red_strip.jpg
 ```
+
+初始化目标位于 `config/initial_pose.json`，每次成功启动的实测结果写入 `runtime/latest_initial_state.json`。正式运行必须使用 `start_project.py`；`detect_red_strip.py` 仅保留用于不控制机器人的离线调试。
 
 默认读取：
 
