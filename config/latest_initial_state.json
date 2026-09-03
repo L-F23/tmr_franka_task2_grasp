@@ -1,10 +1,15 @@
 {
   "schema_version": 1,
-  "recorded_at": "2026-09-03T11:14:52+08:00",
-  "status": "ready",
+  "recorded_at": "2026-09-03T11:41:14+08:00",
+  "status": "blocked_safety_recovery",
   "right_arm_commanded": false,
   "spine": {
     "measured_position_m": 0.6
+  },
+  "mobile_base": {
+    "returned_to_initial_odometry": true,
+    "position_m": [-0.003139555, 0.164913793],
+    "return_net_error_m": 0.0014
   },
   "left_gripper": {
     "measured_position": 0.0,
@@ -12,9 +17,14 @@
   },
   "left_arm": {
     "controller_state": {
-      "joint_state_broadcaster": "active",
-      "franka_robot_state_broadcaster": "active",
-      "joint_impedance_controller": "active"
+      "joint_state_broadcaster": "inactive",
+      "franka_robot_state_broadcaster": "inactive",
+      "joint_impedance_controller": "inactive"
+    },
+    "safety_recovery": {
+      "type": "JointLimitViolation",
+      "joints": [7],
+      "manual_external_enabling_required": true
     },
     "joint_names": [
       "left_fr3v2_joint1",
