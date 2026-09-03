@@ -1,0 +1,13 @@
+{
+  "status": "blocked",
+  "started_at_unix_s": 1788455306.4752967,
+  "execute_authorized": true,
+  "requested_initial_right_m": 2.0,
+  "ordered_stages": [],
+  "stage_results": [],
+  "base_transport_steps": [],
+  "right_arm_commanded": false,
+  "spine_commanded": false,
+  "error": "bootstrap_left_runtime failed with exit code 2",
+  "completed_at_unix_s": 1788455309.0534146
+}
