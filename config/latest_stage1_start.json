@@ -1,0 +1,107 @@
+{
+  "status": "stage_1_start_reached",
+  "coordinate_frame": "base",
+  "requested_backward_m": 0.06,
+  "requested_down_m": 0.055,
+  "base_commanded": false,
+  "right_arm_commanded": false,
+  "motions": [
+    {
+      "label": "stage1_start_backward_1",
+      "maximum_joint_error_rad": 0.0002827022509701571
+    },
+    {
+      "label": "stage1_start_backward_2",
+      "maximum_joint_error_rad": 0.00029263272320001477
+    },
+    {
+      "label": "stage1_start_backward_3",
+      "maximum_joint_error_rad": 0.0003385820114534255
+    },
+    {
+      "label": "stage1_start_down_1",
+      "maximum_joint_error_rad": 0.0003200221482497767
+    },
+    {
+      "label": "stage1_start_down_2",
+      "maximum_joint_error_rad": 0.0002720793246356046
+    },
+    {
+      "label": "stage1_start_down_3",
+      "maximum_joint_error_rad": 0.000265386508495391
+    }
+  ],
+  "before": {
+    "recorded_unix_s": 1788447247.4822245,
+    "joint_positions_rad": [
+      0.1666896790266037,
+      1.3618886470794678,
+      0.33813658356666565,
+      -1.9686990976333618,
+      2.871530294418335,
+      1.2126338481903076,
+      -1.0720040798187256
+    ],
+    "link8_base_position_m": [
+      0.8845027824909224,
+      -0.056086176552912446,
+      0.8859370351840601
+    ],
+    "link8_base_orientation_xyzw": [
+      -0.4993661281138834,
+      0.4967074758827098,
+      -0.5022137844230017,
+      0.5016935999495138
+    ],
+    "spine_position_m": 0.6,
+    "active_errors": []
+  },
+  "planned_targets": {
+    "after_backward_m": [
+      0.8245027824909223,
+      -0.056086176552912446,
+      0.8859370351840601
+    ],
+    "after_down_m": [
+      0.8245027824909223,
+      -0.056086176552912446,
+      0.83093703518406
+    ],
+    "orientation_xyzw": [
+      -0.4993661281138834,
+      0.4967074758827098,
+      -0.5022137844230017,
+      0.5016935999495138
+    ]
+  },
+  "after": {
+    "recorded_unix_s": 1788447285.0154734,
+    "joint_positions_rad": [
+      0.23849643766880035,
+      1.528075098991394,
+      0.34561389684677124,
+      -1.9097392559051514,
+      2.8690922260284424,
+      1.0981417894363403,
+      -1.1193654537200928
+    ],
+    "link8_base_position_m": [
+      0.824711503229267,
+      -0.05612953869425609,
+      0.831095588515109
+    ],
+    "link8_base_orientation_xyzw": [
+      -0.4993095771939162,
+      0.49654915796310073,
+      -0.5022792297761376,
+      0.5018410656612893
+    ],
+    "spine_position_m": 0.6,
+    "active_errors": []
+  },
+  "recommended_retracted_link8_position_m": [
+    0.824711503229267,
+    -0.05612953869425609,
+    0.831095588515109
+  ]
+}
