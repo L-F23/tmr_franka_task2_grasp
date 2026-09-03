@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "semantics": "operator-verified at the actual grasp pose; wrist up/down maps to base right/left",
+  "wrist_reference_image": "captures/grasp_lateral_reference_20260904/aligned_left.jpg",
+  "main_reference_image": "captures/grasp_lateral_reference_20260904/aligned_main.jpg",
+  "wrist_template_bbox_xywh": [300, 220, 145, 195],
+  "wrist_reference_top_y_px": 220,
+  "wrist_deadband_px": 20,
+  "minimum_wrist_match_confidence": 0.60,
+  "main_reference_red_x_px": 785.0,
+  "main_deadband_px": 22,
+  "step_m": 0.02,
+  "speed_mps": 0.015,
+  "maximum_steps": 20,
+  "required_consecutive_aligned_frames": 2,
+  "maximum_alignment_record_age_s": 20.0
+}

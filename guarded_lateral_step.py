@@ -45,9 +45,11 @@ def yaw_of(quaternion) -> float:
 
 
 class GuardedLateralStep(Node):
-    def __init__(self, right_m: float, speed_mps: float) -> None:
+    def __init__(self, right_m: float, speed_mps: float, forward_m: float = 0.0) -> None:
         super().__init__("tmr_guarded_lateral_step")
         self.right_m = right_m
+        self.forward_m = forward_m
+        self.axis_kind = "forward" if abs(forward_m) > 0.0 else "right"
         self.speed_mps = speed_mps
         self.pose = None
         self.velocity = None
@@ -157,16 +159,28 @@ class GuardedLateralStep(Node):
             for x, y in points:
                 if -0.42 <= x <= 0.42 and -0.31 <= y <= 0.31:
                     continue
-                if not rear_limit <= x <= front_limit:
-                    continue
-                if direction > 0 and y < -lateral_extent:
-                    clearances.append(-lateral_extent - y)
-                elif direction < 0 and y > lateral_extent:
-                    clearances.append(y - lateral_extent)
+                if self.axis_kind == "right":
+                    if not rear_limit <= x <= front_limit:
+                        continue
+                    if direction > 0 and y < -lateral_extent:
+                        clearances.append(-lateral_extent - y)
+                    elif direction < 0 and y > lateral_extent:
+                        clearances.append(y - lateral_extent)
+                else:
+                    if not -lateral_extent <= y <= lateral_extent:
+                        continue
+                    if direction > 0 and x > front_limit:
+                        clearances.append(x - front_limit)
+                    elif direction < 0 and x < rear_limit:
+                        clearances.append(rear_limit - x)
         nearest = min(clearances) if clearances else None
         required = speed * speed / (2.0 * 0.25) + 0.25 * speed + 0.10
         if nearest is not None and nearest <= required:
-            side = "right" if direction > 0 else "left"
+            side = (
+                ("right" if direction > 0 else "left")
+                if self.axis_kind == "right"
+                else ("forward" if direction > 0 else "backward")
+            )
             raise RuntimeError(
                 f"{side} envelope blocked: clearance={nearest:.3f}m "
                 f"required={required:.3f}m"
@@ -176,10 +190,15 @@ class GuardedLateralStep(Node):
     def run(self, timeout_s: float) -> dict:
         self.wait_ready()
         start_x, start_y, start_yaw = self.pose
-        right_axis = (math.sin(start_yaw), -math.cos(start_yaw))
-        target_x = start_x + self.right_m * right_axis[0]
-        target_y = start_y + self.right_m * right_axis[1]
-        direction = 1.0 if self.right_m > 0 else -1.0
+        axis = (
+            (math.cos(start_yaw), math.sin(start_yaw))
+            if self.axis_kind == "forward"
+            else (math.sin(start_yaw), -math.cos(start_yaw))
+        )
+        requested = self.forward_m if self.axis_kind == "forward" else self.right_m
+        target_x = start_x + requested * axis[0]
+        target_y = start_y + requested * axis[1]
+        direction = 1.0 if requested > 0 else -1.0
         deadline = time.monotonic() + timeout_s
         last_tick = time.monotonic()
         nearest_seen = math.inf
@@ -190,9 +209,9 @@ class GuardedLateralStep(Node):
                     raise RuntimeError("odometry became stale")
                 x, y, yaw = self.pose
                 progress = (
-                    (x - start_x) * right_axis[0] + (y - start_y) * right_axis[1]
+                    (x - start_x) * axis[0] + (y - start_y) * axis[1]
                 )
-                remaining = self.right_m - progress
+                remaining = requested - progress
                 yaw_error = wrap(start_yaw - yaw)
                 if abs(remaining) <= 0.005 and abs(yaw_error) <= math.radians(1.0):
                     break
@@ -203,11 +222,18 @@ class GuardedLateralStep(Node):
                 world_ex, world_ey = target_x - x, target_y - y
                 body_x = math.cos(yaw) * world_ex + math.sin(yaw) * world_ey
                 body_y = -math.sin(yaw) * world_ex + math.cos(yaw) * world_ey
-                desired = (
-                    clamp(0.8 * body_x, -0.02, 0.02),
-                    clamp(0.9 * body_y, -raw_speed, raw_speed),
-                    clamp(1.2 * yaw_error, -0.06, 0.06),
-                )
+                if self.axis_kind == "forward":
+                    desired = (
+                        clamp(0.9 * body_x, -raw_speed, raw_speed),
+                        clamp(0.8 * body_y, -0.02, 0.02),
+                        clamp(1.2 * yaw_error, -0.06, 0.06),
+                    )
+                else:
+                    desired = (
+                        clamp(0.8 * body_x, -0.02, 0.02),
+                        clamp(0.9 * body_y, -raw_speed, raw_speed),
+                        clamp(1.2 * yaw_error, -0.06, 0.06),
+                    )
                 tick = time.monotonic()
                 delta = clamp(tick - last_tick, 0.02, 0.10)
                 last_tick = tick
@@ -224,25 +250,31 @@ class GuardedLateralStep(Node):
 
         end_x, end_y, end_yaw = self.pose
         actual = (
-            (end_x - start_x) * right_axis[0] + (end_y - start_y) * right_axis[1]
+            (end_x - start_x) * axis[0] + (end_y - start_y) * axis[1]
         )
-        return {
+        result = {
             "status": "success",
-            "requested_right_m": self.right_m,
-            "actual_right_m": actual,
-            "error_m": actual - self.right_m,
+            "error_m": actual - requested,
             "yaw_error_deg": math.degrees(wrap(end_yaw - start_yaw)),
             "minimum_directional_clearance_m": (
                 None if math.isinf(nearest_seen) else nearest_seen
             ),
         }
+        result[f"requested_{self.axis_kind}_m"] = requested
+        result[f"actual_{self.axis_kind}_m"] = actual
+        return result
 
     def check_only(self) -> dict:
         self.wait_ready()
-        direction = 1.0 if self.right_m > 0 else -1.0
+        requested = self.forward_m if self.axis_kind == "forward" else self.right_m
+        direction = 1.0 if requested > 0 else -1.0
         return {
             "status": "ready",
-            "direction": "right" if direction > 0 else "left",
+            "direction": (
+                ("right" if direction > 0 else "left")
+                if self.axis_kind == "right"
+                else ("forward" if direction > 0 else "backward")
+            ),
             "directional_clearance_m": self.clearance(direction, self.speed_mps),
             "motion_commanded": False,
         }
@@ -250,17 +282,22 @@ class GuardedLateralStep(Node):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--right-m", type=float, required=True)
+    direction = parser.add_mutually_exclusive_group(required=True)
+    direction.add_argument("--right-m", type=float)
+    direction.add_argument("--forward-m", type=float)
     parser.add_argument("--speed-mps", type=float, default=0.025)
     parser.add_argument("--timeout-s", type=float, default=8.0)
     parser.add_argument("--check-only", action="store_true")
     args = parser.parse_args()
-    if not 0.008 <= abs(args.right_m) <= 0.08:
-        parser.error("absolute step distance must be in [0.008, 0.08] m")
+    distance = args.forward_m if args.forward_m is not None else args.right_m
+    if not 0.008 <= abs(distance) <= 2.0:
+        parser.error("absolute motion distance must be in [0.008, 2.0] m")
     if not 0.008 <= args.speed_mps <= 0.04:
         parser.error("speed must be in [0.008, 0.04] m/s")
     rclpy.init()
-    node = GuardedLateralStep(args.right_m, args.speed_mps)
+    node = GuardedLateralStep(
+        args.right_m or 0.0, args.speed_mps, forward_m=args.forward_m or 0.0
+    )
     try:
         result = node.check_only() if args.check_only else node.run(args.timeout_s)
         print(json.dumps(result, indent=2), flush=True)

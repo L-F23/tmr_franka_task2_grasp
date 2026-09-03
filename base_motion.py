@@ -68,6 +68,67 @@ def guarded_move_right(
     return result
 
 
+def guarded_move_right_continuous(
+    distance_m: float, *, speed_mps: float = 0.04, timeout_s: float = 80.0
+) -> dict:
+    """Execute one uninterrupted long lateral move with live odom/LiDAR guards."""
+    if not 0.008 <= abs(distance_m) <= 2.0:
+        raise ValueError("absolute continuous distance must be in [0.008, 2.0] m")
+    command = (
+        f"{BASE_ENV}; python3 {REMOTE_MOVER} --right-m {distance_m:.6f} "
+        f"--speed-mps {speed_mps:.4f} --timeout-s {timeout_s:.1f}"
+    )
+    completed = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", BASE_HOST, command],
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=timeout_s + 20.0,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"continuous guarded base move failed: {completed.stdout.strip()} "
+            f"{completed.stderr.strip()}"
+        )
+    start = completed.stdout.find("{")
+    if start < 0:
+        raise RuntimeError("continuous guarded base move returned no JSON result")
+    result = json.loads(completed.stdout[start:])
+    if result.get("status") != "success":
+        raise RuntimeError(f"continuous guarded base move did not succeed: {result}")
+    return result
+
+
+def guarded_move_forward(
+    distance_m: float, *, speed_mps: float = 0.02, timeout_s: float = 15.0
+) -> dict:
+    """Execute one signed fore/aft step with odometry and dual-LiDAR guards."""
+    if not 0.008 <= abs(distance_m) <= 0.08:
+        raise ValueError("absolute step distance must be in [0.008, 0.08] m")
+    command = (
+        f"{BASE_ENV}; python3 {REMOTE_MOVER} --forward-m {distance_m:.6f} "
+        f"--speed-mps {speed_mps:.4f} --timeout-s {timeout_s:.1f}"
+    )
+    completed = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", BASE_HOST, command],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"guarded fore/aft step failed: {completed.stdout.strip()} "
+            f"{completed.stderr.strip()}"
+        )
+    start = completed.stdout.find("{")
+    if start < 0:
+        raise RuntimeError("guarded fore/aft step returned no JSON result")
+    result = json.loads(completed.stdout[start:])
+    if result.get("status") != "success":
+        raise RuntimeError(f"guarded fore/aft step did not succeed: {result}")
+    return result
+
+
 def guarded_transport(
     distance_m: float,
     *,

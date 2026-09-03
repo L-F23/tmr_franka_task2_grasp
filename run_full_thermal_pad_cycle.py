@@ -10,24 +10,27 @@ from pathlib import Path
 import subprocess
 import time
 
-from base_motion import guarded_transport
+from base_motion import guarded_move_right_continuous
 
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_RECORD = ROOT / "config" / "latest_full_thermal_pad_cycle.json"
+MAX_PREPARED_RECORD_AGE_S = 20.0
 FULL_STAGE_ORDER = (
     "left_runtime_ready",
     "left_initial_verified_before_base_transport",
     "isolated_base_runtime_ready",
     "base_right_2m_complete",
     "black_base_and_thermal_pad_centered",
+    "table_edge_fore_aft_aligned",
     "left_pregrasp_reached",
     "left_grasp_pose_reached",
+    "pregrasp_lateral_alignment_confirmed",
     "thermal_pad_grasped",
     "left_arm_lifted_12cm",
     "red_pad_station_reached",
     "placement_forward_12cm_down_12cm_complete",
-    "retract_11cm_down_1cm_complete_then_gripper_open",
+    "retract_halfway_then_tilt_and_open_until_complete",
     "left_initial_restored",
 )
 
@@ -54,12 +57,25 @@ def python_command(script: str, *arguments: str) -> list[str]:
     return ["/usr/bin/python3", "-u", str(ROOT / script), *arguments]
 
 
+def validate_prepared_record(path: Path, now: float | None = None) -> dict:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    age = (time.time() if now is None else now) - float(value["prepared_at_unix_s"])
+    if value.get("schema_version") != 1 or value.get("status") != "ready":
+        raise RuntimeError("quick-start prepared record is not ready")
+    if age < 0.0 or age > MAX_PREPARED_RECORD_AGE_S:
+        raise RuntimeError(f"quick-start prepared record is stale: {age:.3f}s")
+    if value.get("physical_motion_commanded") is not False:
+        raise RuntimeError("invalid quick-start prepared record motion flag")
+    return value
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--initial-right-m", type=float, default=2.0)
     parser.add_argument("--maximum-alignment-steps", type=int, default=20)
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
+    parser.add_argument("--prepared-record", type=Path)
     args = parser.parse_args()
     if not args.execute:
         print(json.dumps({
@@ -85,11 +101,18 @@ def main() -> int:
     }
     code = 2
     try:
-        record["stage_results"].append(run(
-            python_command("bootstrap_left_runtime.py", "--state-only"),
-            "bootstrap_left_runtime",
-            45.0,
-        ))
+        if args.prepared_record is None:
+            record["stage_results"].append(run(
+                python_command("bootstrap_left_runtime.py", "--state-only"),
+                "bootstrap_left_runtime",
+                60.0,
+            ))
+        else:
+            prepared = validate_prepared_record(args.prepared_record)
+            record["stage_results"].append({
+                "label": "quick_start_prepared_runtime",
+                "prepared_at_unix_s": prepared["prepared_at_unix_s"],
+            })
         record["ordered_stages"].append(FULL_STAGE_ORDER[0])
         record["stage_results"].append(run(
             python_command("restore_left_initial_direct.py"),
@@ -98,21 +121,26 @@ def main() -> int:
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[1])
 
-        record["stage_results"].append(run(
-            [
-                "ssh", "-o", "BatchMode=yes", "tmr-user@172.16.0.50",
-                "bash /home/tmr-user/tmr_cycle/scripts/19_ensure_navigation_stack.sh",
-            ],
-            "ensure_isolated_base_runtime",
-            150.0,
-        ))
+        if args.prepared_record is None:
+            record["stage_results"].append(run(
+                [
+                    "ssh", "-o", "BatchMode=yes", "tmr-user@172.16.0.50",
+                    "bash /home/tmr-user/tmr_cycle/scripts/19_ensure_navigation_stack.sh",
+                ],
+                "ensure_isolated_base_runtime",
+                150.0,
+            ))
+        else:
+            # The prepared record is consumed quickly and validated above;
+            # the base's guarded mover still performs fresh odom/LiDAR/lease
+            # checks before every physical step.
+            record["stage_results"].append({"label": "quick_start_base_runtime_reused"})
         record["ordered_stages"].append(FULL_STAGE_ORDER[2])
 
-        transport_steps, actual_transport_m = guarded_transport(args.initial_right_m)
-        for result in transport_steps:
-            record["base_transport_steps"].append(result)
-            print(json.dumps({"base_transport_step": result}), flush=True)
-        record["actual_initial_right_m"] = actual_transport_m
+        transport_result = guarded_move_right_continuous(args.initial_right_m)
+        record["base_transport_steps"].append(transport_result)
+        print(json.dumps({"continuous_base_transport": transport_result}), flush=True)
+        record["actual_initial_right_m"] = float(transport_result["actual_right_m"])
         record["ordered_stages"].append(FULL_STAGE_ORDER[3])
 
         record["stage_results"].append(run(
@@ -127,6 +155,13 @@ def main() -> int:
         record["ordered_stages"].append(FULL_STAGE_ORDER[4])
 
         record["stage_results"].append(run(
+            python_command("table_edge_positioning.py", "--execute"),
+            "table_edge_fore_aft_alignment",
+            180.0,
+        ))
+        record["ordered_stages"].append(FULL_STAGE_ORDER[5])
+
+        record["stage_results"].append(run(
             python_command(
                 "execute_thermal_pad_grasp.py",
                 "--execute", "--empty-cycle", "--fast",
@@ -136,7 +171,7 @@ def main() -> int:
             "left_pregrasp",
             180.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[5])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[6])
 
         record["stage_results"].append(run(
             python_command(
@@ -148,14 +183,21 @@ def main() -> int:
             "left_grasp_pose",
             60.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[6])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[7])
+
+        record["stage_results"].append(run(
+            python_command("pregrasp_lateral_alignment.py", "--execute"),
+            "mandatory_pregrasp_lateral_alignment",
+            360.0,
+        ))
+        record["ordered_stages"].append(FULL_STAGE_ORDER[8])
 
         record["stage_results"].append(run(
             python_command("stage1_close_gripper.py", "--execute"),
             "thermal_pad_grasp",
             60.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[7])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[9])
 
         record["stage_results"].append(run(
             python_command(
@@ -167,7 +209,7 @@ def main() -> int:
             "left_vertical_lift",
             90.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[8])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[10])
 
         record["stage_results"].append(run(
             python_command(
@@ -177,7 +219,7 @@ def main() -> int:
             "red_pad_station_alignment",
             180.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[9])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[11])
 
         record["stage_results"].append(run(
             python_command(
@@ -189,7 +231,7 @@ def main() -> int:
             "placement_approach",
             150.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[10])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[12])
 
         record["stage_results"].append(run(
             python_command(
@@ -199,14 +241,14 @@ def main() -> int:
             "retract_down_then_release",
             120.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[11])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[13])
 
         record["stage_results"].append(run(
             python_command("restore_left_initial_direct.py"),
             "restore_left_initial_after_release",
             150.0,
         ))
-        record["ordered_stages"].append(FULL_STAGE_ORDER[12])
+        record["ordered_stages"].append(FULL_STAGE_ORDER[14])
         record["status"] = "complete"
         code = 0
     except Exception as exc:

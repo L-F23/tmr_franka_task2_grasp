@@ -26,7 +26,10 @@ def detect_target(image: np.ndarray) -> Target | None:
     for contour in contours:
         area = cv2.contourArea(contour)
         x, y, w, h = cv2.boundingRect(contour)
-        if x <= 3 or y + h >= int(0.82 * height):
+        # Border-connected robot/cable silhouettes can contain a grey patch
+        # and used to masquerade as the base.  Wait for the complete base to
+        # enter the wrist frame before handing control over from the main view.
+        if x <= 3 or y <= 3 or x + w >= width - 3 or y + h >= int(0.82 * height):
             continue
         if area < 0.008 * width * height or w < 45 or h < 35:
             continue

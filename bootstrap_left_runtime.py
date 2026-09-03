@@ -8,7 +8,12 @@ import time
 
 import rclpy
 from action_msgs.msg import GoalStatus
-from controller_manager_msgs.srv import SetHardwareComponentState, SwitchController
+from controller_manager_msgs.srv import (
+    ListControllers,
+    ListHardwareComponents,
+    SetHardwareComponentState,
+    SwitchController,
+)
 from franka_msgs.action import ErrorRecovery
 from franka_msgs.msg import FrankaRobotState
 from lifecycle_msgs.msg import State
@@ -19,6 +24,8 @@ from sensor_msgs.msg import JointState
 
 
 JOINT_NAMES = [f"left_fr3v2_joint{i}" for i in range(1, 8)]
+HARDWARE_NAME = "left_FrankaHardwareInterface"
+STATE_BROADCASTERS = ("joint_state_broadcaster", "franka_robot_state_broadcaster")
 
 
 class Bootstrap(Node):
@@ -42,6 +49,12 @@ class Bootstrap(Node):
         self.hardware = self.create_client(
             SetHardwareComponentState, "/left/controller_manager/set_hardware_component_state"
         )
+        self.hardware_list = self.create_client(
+            ListHardwareComponents, "/left/controller_manager/list_hardware_components"
+        )
+        self.controller_list = self.create_client(
+            ListControllers, "/left/controller_manager/list_controllers"
+        )
         self.switch = self.create_client(
             SwitchController, "/left/controller_manager/switch_controller"
         )
@@ -62,18 +75,33 @@ class Bootstrap(Node):
             raise RuntimeError("ROS service timeout")
         return future.result()
 
+    def hardware_state(self) -> str:
+        if not self.hardware_list.wait_for_service(timeout_sec=5.0):
+            raise RuntimeError("left hardware-list service unavailable")
+        response = self.call(self.hardware_list, ListHardwareComponents.Request(), 8.0)
+        for component in response.component:
+            if component.name == HARDWARE_NAME:
+                return component.state.label
+        raise RuntimeError(f"hardware component not found: {HARDWARE_NAME}")
+
+    def controller_states(self) -> dict[str, str]:
+        if not self.controller_list.wait_for_service(timeout_sec=5.0):
+            raise RuntimeError("left controller-list service unavailable")
+        response = self.call(self.controller_list, ListControllers.Request(), 8.0)
+        return {controller.name: controller.state for controller in response.controller}
+
     def set_hardware_active(self):
         if not self.hardware.wait_for_service(timeout_sec=5.0):
             raise RuntimeError("left hardware lifecycle service unavailable")
-        for _ in range(2):
-            request = SetHardwareComponentState.Request()
-            request.name = "left_FrankaHardwareInterface"
-            request.target_state.id = State.PRIMARY_STATE_ACTIVE
-            request.target_state.label = "active"
-            response = self.call(self.hardware, request, 12.0)
-            if response.state.id == State.PRIMARY_STATE_ACTIVE:
-                return
-        raise RuntimeError(f"left hardware activation failed: {response.state.label}")
+        request = SetHardwareComponentState.Request()
+        request.name = HARDWARE_NAME
+        request.target_state.id = State.PRIMARY_STATE_ACTIVE
+        request.target_state.label = "active"
+        response = self.call(self.hardware, request, 18.0)
+        if not response.ok or response.state.id != State.PRIMARY_STATE_ACTIVE:
+            raise RuntimeError(
+                f"left hardware activation failed: ok={response.ok}, state={response.state.label}"
+            )
 
     def recover(self):
         if not self.recovery.wait_for_server(timeout_sec=4.0):
@@ -90,6 +118,8 @@ class Bootstrap(Node):
             raise RuntimeError("left error recovery failed")
 
     def switch_controllers(self, activate, deactivate=(), strictness=2):
+        if not activate and not deactivate:
+            return
         if not self.switch.wait_for_service(timeout_sec=5.0):
             raise RuntimeError("left controller switch service unavailable")
         request = SwitchController.Request()
@@ -100,7 +130,31 @@ class Bootstrap(Node):
         request.timeout.sec = 5
         response = self.call(self.switch, request, 8.0)
         if not response.ok:
-            raise RuntimeError(f"controller activation failed: {list(activate)}")
+            raise RuntimeError(
+                f"controller switch failed: activate={list(activate)}, "
+                f"deactivate={list(deactivate)}"
+            )
+
+    def ensure_controllers(self, required) -> None:
+        states = self.controller_states()
+        missing = [name for name in required if name not in states]
+        if missing:
+            raise RuntimeError(f"required left controllers are not loaded: {missing}")
+        inactive = [name for name in required if states[name] != "active"]
+        self.switch_controllers(inactive, strictness=2)
+
+    def recover_to_active(self) -> None:
+        # Franka's documented recovery sequence is recovery first, then
+        # hardware activation, then controller activation.  Deactivating any
+        # still-active controller also makes this safe on ROS 2 Humble while
+        # remaining harmless on Jazzy (where controllers normally deactivate
+        # automatically after a hardware error).
+        states = self.controller_states()
+        active = [name for name, state in states.items() if state == "active"]
+        self.switch_controllers([], active, strictness=1)
+        self.recover()
+        self.set_hardware_active()
+        self.ensure_controllers(STATE_BROADCASTERS)
 
     def wait_measured(self, timeout=5.0):
         self.q = self.state = None
@@ -127,20 +181,35 @@ class Bootstrap(Node):
         return [name for name in errors.get_fields_and_field_types() if getattr(errors, name)]
 
     def run(self, state_only=False):
-        self.set_hardware_active()
-        self.recover()
-        self.switch_controllers(
-            ["joint_state_broadcaster", "franka_robot_state_broadcaster"],
-            strictness=1,
-        )
-        self.wait_measured()
-        if self.active_errors():
-            self.recover()
+        initial_hardware_state = self.hardware_state()
+        recovery_performed = False
+        if initial_hardware_state != "active":
+            self.recover_to_active()
+            recovery_performed = True
+        else:
+            self.ensure_controllers(STATE_BROADCASTERS)
+        try:
             self.wait_measured()
+        except RuntimeError:
+            if recovery_performed:
+                raise
+            self.recover_to_active()
+            recovery_performed = True
+            self.wait_measured()
+        if self.active_errors():
+            self.recover_to_active()
+            recovery_performed = True
+            self.wait_measured()
+            errors = self.active_errors()
+            if errors:
+                raise RuntimeError("left errors after recovery: " + ",".join(errors))
         measured = list(self.q)
         if state_only:
             return {
                 "status": "state_only_ready",
+                "initial_hardware_state": initial_hardware_state,
+                "final_hardware_state": self.hardware_state(),
+                "recovery_performed": recovery_performed,
                 "measured_joint_positions_rad": measured,
                 "impedance_controller_activated": False,
             }

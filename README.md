@@ -102,12 +102,40 @@ FK/IK 规划器还会生成完整但默认禁止实机执行的动作序列：�
 
 ## 2 m 底盘接近与导热片完整流程
 
+### 快速启动（实机服务已正常）
+
+推荐从机器人主机 `.100` 使用统一入口。默认只准备运行环境，不移动底盘、机械臂或夹爪：
+
+```bash
+cd /home/aup/tmr_franka_task2_grasp && source /home/aup/tmr_env.sh && /usr/bin/python3 -u quick_start.py
+```
+
+只做只读检查：
+
+```bash
+/usr/bin/python3 -u quick_start.py --check-only
+```
+
+确认机器人处于本任务指定起点、夹爪状态正确、现场无人且急停可触达后，一行启动完整流程：
+
+```bash
+cd /home/aup/tmr_franka_task2_grasp && source /home/aup/tmr_env.sh && /usr/bin/python3 -u quick_start.py --execute
+```
+
+快速入口会加单实例锁，先检查核心 ROS 服务；随后并行恢复左臂的“仅状态”运行态和底盘隔离运行栈，最后要求主摄与左腕帧序号持续递增。健康服务会直接复用，不会重启；只允许重启无硬件所有权的三相机 HTTP 桥。左臂仅在硬件不是 `active` 或状态流异常时执行一次有界恢复，顺序固定为“停活动控制器 → ErrorRecovery → 激活硬件 → 激活状态广播器”。若 FR3、Robotiq、Spine、D405 或 IK 等核心驱动缺失，入口不会猜测或启动第二实例，而是阻塞并要求先运行参考项目的冷启动助手：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\grasp\scripts\start_tmr_system.ps1
+```
+
+`--execute` 会把刚生成、有效期仅 20 秒且明确标记“未发送运动”的准备记录交给完整流程，避免重复初始化；此后每个底盘短步仍重新检查里程计、双雷达和控制租约。FCI 实时环始终留在机器人本机，底盘 Humble Domain 97 与机械臂 Jazzy Domain 0 不做高频 DDS 混接。
+
 完整流程入口为：
 
 ```bash
 cd /home/aup/tmr_franka_task2_grasp && source /home/aup/tmr_env.sh && /usr/bin/python3 -u run_full_thermal_pad_cycle.py --execute
 ```
 
-入口先把左臂恢复到运输安全初始位，并通过底盘主机的 `19_ensure_navigation_stack.sh` 自动恢复隔离任务栈、关闭冲突的旧控制栈，然后将底盘向右移动 `2.0 m`。长距离移动被拆成最多 `0.08 m` 的短步；每一步都必须同时获得新鲜里程计、前后双雷达和底盘速度控制租约，任一条件失效即发送零速并终止全流程。之后依次执行黑色底座/灰色导热片闭环定位、记录抓取位闭爪、垂直上提 `0.12 m`、红色垫片站位、前移 `0.12 m` 与下降 `0.12 m`。
+入口先把左臂恢复到运输安全初始位，并通过底盘主机的 `19_ensure_navigation_stack.sh` 自动恢复隔离任务栈、关闭冲突的旧控制栈，然后用一条连续里程计闭环轨迹将底盘向右移动 `2.0 m`，中途不再分段停走。整段轨迹持续监控新鲜里程计、前后双雷达和底盘速度控制租约，任一条件失效即发送零速并终止全流程。之后依次执行黑色底座/灰色导热片粗定位、桌边前后位置判定和抓取位姿到达。闭爪前必须运行 `pregrasp_lateral_alignment.py`：左腕可见目标时按“导热片在夹爪上方则底盘右移、下方则左移”校准；目标在腕部画面外时使用主摄彩色板布局判断搜索方向。只有左腕连续两帧确认对准且记录未过期，`stage1_close_gripper.py` 才允许闭爪。随后垂直上提 `0.12 m`、定位红色垫片、前移 `0.12 m` 并下降 `0.12 m`。
 
-最终释放使用 `stage5_release_diagonal.py`：夹爪在左臂完成全部后退 `0.11 m` 和垂直下降 `0.01 m` 路点之前保持闭合；所有路点及末端误差验证通过后才发送唯一一次全开命令，随后左臂回到初始位。流程记录写入 `config/latest_full_thermal_pad_cycle.json`。不带 `--execute` 时只输出阶段计划，不发送任何运动命令。
+最终释放使用 `stage5_release_diagonal.py`：左臂后退 `0.11 m`、垂直下降 `0.01 m`；到达一半时开始把末端朝地面倾斜 `8°`，同时异步张开夹爪，退到位时验证夹爪已完全张开，随后左臂回到初始位。流程记录写入 `config/latest_full_thermal_pad_cycle.json`。不带 `--execute` 时只输出阶段计划，不发送任何运动命令。

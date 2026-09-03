@@ -83,6 +83,12 @@ def detect_colored_pads(
             cv2.drawContours(pixels, [contour], -1, 255, -1)
             selected = pixels > 0
             mean_saturation = float(np.mean(hsv[..., 1][selected]))
+            # White robot links and floor shadows can fall inside the broad
+            # green hue interval, but their saturation stays low.  The four
+            # printed task pads remain strongly saturated in the deployed ZED
+            # stream, including the partially arm-occluded red pad.
+            if mean_saturation < 100.0:
+                continue
             confidence = float(np.clip(
                 0.50 * fill + 0.35 * mean_saturation / 255.0
                 + 0.15 * min(1.0, area / 1200.0),

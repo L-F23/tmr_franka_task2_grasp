@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "calibrated_at_unix_s": 1788457742.630615,
+  "semantics": "current operator-confirmed table-edge grasp distance",
+  "main": {
+    "top_y_px": 274,
+    "bottom_y_px": 719,
+    "top_gradient": 10.431358337402344,
+    "roi_x_px": [
+      704,
+      1152
+    ]
+  },
+  "left_wrist": {
+    "left_x_px": 140,
+    "left_gradient": 11.147884368896484,
+    "roi_y_px": [
+      48,
+      249
+    ]
+  },
+  "image_shapes": {
+    "main": [
+      720,
+      1280,
+      3
+    ],
+    "left": [
+      480,
+      640,
+      3
+    ]
+  },
+  "tolerances_px": {
+    "main_top_y": 12,
+    "left_wrist_left_x": 12
+  },
+  "step_m": 0.01,
+  "maximum_steps": 24,
+  "direction_model": {
+    "main_positive_y_error": "base_backward",
+    "left_wrist_positive_x_error": "base_forward"
+  },
+  "source_images": {
+    "main": "captures/table_edge_reference_20260904/main.jpg",
+    "left": "captures/table_edge_reference_20260904/left.jpg"
+  }
+}

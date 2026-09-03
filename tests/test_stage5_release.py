@@ -8,7 +8,7 @@ def test_release_target_moves_backward_and_down_together():
     assert np.allclose(target, [0.89, 0.1, 0.79])
 
 
-def test_gripper_opens_only_after_all_arm_waypoints_complete():
+def test_gripper_begins_at_halfway_and_finishes_after_arm():
     events = []
 
     class FakeExecutor:
@@ -19,19 +19,23 @@ def test_gripper_opens_only_after_all_arm_waypoints_complete():
         def motion_gate(self):
             events.append(("gate",))
 
-        def command_gripper(self, position, label):
-            events.append(("gripper", position, label))
+        def begin_opening(self, position):
+            events.append(("gripper_start", position))
+            return "handle"
+
+        def finish_opening(self, handle):
+            events.append(("gripper_finish", handle))
             return {"reached_goal": True}
 
-    plan = [
-        {"joint_positions_rad": [0.1] * 7},
-        {"joint_positions_rad": [0.2] * 7},
-    ]
-    motions, gripper = OrderedRelease.retract_then_open(
-        FakeExecutor(), plan, 0.012, 0.0
+    first_half = [{"joint_positions_rad": [0.1] * 7}]
+    second_half = [{"joint_positions_rad": [0.2] * 7}]
+    motions, gripper = OrderedRelease.retract_tilt_and_open(
+        FakeExecutor(), first_half, second_half, 0.012, 0.0
     )
 
-    assert [event[0] for event in events] == ["arm", "arm", "gate", "gripper"]
+    assert [event[0] for event in events] == [
+        "arm", "gate", "gripper_start", "arm", "gate", "gripper_finish"
+    ]
     assert len(motions) == 2
     assert gripper["reached_goal"] is True
-    assert events[-1][2] == "open_after_arm_motion_complete"
+    assert events[2] == ("gripper_start", 0.0)

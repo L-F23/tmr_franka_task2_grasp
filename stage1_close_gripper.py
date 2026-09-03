@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import time
 
 import numpy as np
 import rclpy
@@ -17,6 +18,7 @@ from thermal_pad_ik import DEFAULT_CONFIG, ROOT
 
 DEFAULT_REFERENCE = ROOT / "config" / "latest_stage1_start.json"
 DEFAULT_RECORD = ROOT / "config" / "latest_stage1_close.json"
+DEFAULT_ALIGNMENT_RECORD = ROOT / "config" / "latest_pregrasp_lateral_alignment.json"
 
 
 def reference_joints(record: dict) -> list[float]:
@@ -31,6 +33,7 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--reference", type=Path, default=DEFAULT_REFERENCE)
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
+    parser.add_argument("--alignment-record", type=Path, default=DEFAULT_ALIGNMENT_RECORD)
     parser.add_argument("--maximum-reference-error-rad", type=float, default=0.012)
     args = parser.parse_args()
     if not args.execute:
@@ -38,10 +41,23 @@ def main() -> int:
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
     reference = json.loads(args.reference.read_text(encoding="utf-8"))
+    alignment = json.loads(args.alignment_record.read_text(encoding="utf-8"))
+    alignment_age_s = time.time() - float(alignment.get("aligned_at_unix_s", 0.0))
+    maximum_alignment_age_s = float(json.loads(
+        (ROOT / "config" / "pregrasp_lateral_alignment.json").read_text(encoding="utf-8")
+    )["maximum_alignment_record_age_s"])
+    if alignment.get("status") != "pregrasp_lateral_alignment_confirmed":
+        raise RuntimeError("mandatory pregrasp lateral alignment is not confirmed")
+    if not 0.0 <= alignment_age_s <= maximum_alignment_age_s:
+        raise RuntimeError(
+            f"mandatory pregrasp alignment record is stale: {alignment_age_s:.3f}s"
+        )
     expected = np.asarray(reference_joints(reference), dtype=float)
     report = {
         "status": "starting",
         "reference": str(args.reference),
+        "alignment_record": str(args.alignment_record),
+        "alignment_age_s": alignment_age_s,
         "base_commanded": False,
         "right_arm_commanded": False,
         "spine_commanded": False,
