@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = ROOT / "config" / "initial_pose.json"
-DEFAULT_RECORD = ROOT / "runtime" / "latest_initial_state.json"
+DEFAULT_RECORD = ROOT / "config" / "latest_initial_state.json"
 ROS_ENV = Path("/home/aup/tmr_env.sh")
 RESTORE_LEFT = Path("/home/aup/tmr-mobile-manipulation/grasp/scripts/restore_left_pick_initial.py")
 SPINE_API = "https://172.16.16.10/spine/api"

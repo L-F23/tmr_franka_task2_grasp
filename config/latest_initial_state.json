@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-03T11:14:52+08:00",
+  "status": "ready",
+  "right_arm_commanded": false,
+  "spine": {
+    "measured_position_m": 0.6
+  },
+  "left_gripper": {
+    "measured_position": 0.0,
+    "state": "open"
+  },
+  "left_arm": {
+    "controller_state": {
+      "joint_state_broadcaster": "active",
+      "franka_robot_state_broadcaster": "active",
+      "joint_impedance_controller": "active"
+    },
+    "joint_names": [
+      "left_fr3v2_joint1",
+      "left_fr3v2_joint2",
+      "left_fr3v2_joint3",
+      "left_fr3v2_joint4",
+      "left_fr3v2_joint5",
+      "left_fr3v2_joint6",
+      "left_fr3v2_joint7"
+    ],
+    "target_positions_rad": [
+      -1.71976900100708,
+      -1.6329213380813599,
+      1.8240526914596558,
+      -2.447446823120117,
+      2.177191972732544,
+      0.8496646285057068,
+      -3.05077862739563
+    ],
+    "measured_positions_rad": [
+      -1.72445547580719,
+      -1.6349736452102661,
+      1.8240110874176025,
+      -2.4473989009857178,
+      2.177124261856079,
+      0.8514453768730164,
+      -3.0506927967071533
+    ],
+    "maximum_measured_error_rad": 0.00468647480011
+  }
+}
