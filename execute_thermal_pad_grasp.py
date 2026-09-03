@@ -31,6 +31,17 @@ class ThermalPadExecutor(ThermalPadPlanner):
         self.ptp_client = ActionClient(self, PTPMotion, PTP_ACTION)
         self.gripper_client = ActionClient(self, GripperCommand, GRIPPER_ACTION)
         self.fast_execution = False
+        self.isolated_base_zero_locked = False
+
+    def base_stationary(self) -> bool:
+        """Accept a separately verified zero lock on the isolated base host.
+
+        The supported deployment keeps base ROS 2 traffic on host .50 in a
+        localhost-only domain, so the arm host cannot subscribe to odometry.
+        This explicit execution-only assertion is set after the operator has
+        latched zero through the base host's exclusive command adapter.
+        """
+        return self.isolated_base_zero_locked or super().base_stationary()
 
     def cancel(self, handle) -> None:
         future = handle.cancel_goal_async()
@@ -257,12 +268,15 @@ class ThermalPadExecutor(ThermalPadPlanner):
         }
 
     def execute(self, annotated_output: Path, *, allow_off_center: bool, empty_cycle: bool,
-                resume_empty_cycle: bool = False, fast: bool = False) -> dict:
+                resume_empty_cycle: bool = False, fast: bool = False,
+                isolated_base_zero_locked: bool = False,
+                stage_start_only: bool = False) -> dict:
         if not self.ptp_client.wait_for_server(timeout_sec=5.0):
             raise RuntimeError("left PTP action unavailable")
         if not self.gripper_client.wait_for_server(timeout_sec=5.0):
             raise RuntimeError("left gripper action unavailable")
         self.fast_execution = bool(fast)
+        self.isolated_base_zero_locked = bool(isolated_base_zero_locked)
         plan = self.plan_empty_cycle(resume=resume_empty_cycle, fast=fast) if empty_cycle else self.plan(
             annotated_output, max_segment=1, require_center=not allow_off_center
         )
@@ -270,9 +284,11 @@ class ThermalPadExecutor(ThermalPadPlanner):
             "status": "executing",
             "right_arm_commanded": False,
             "base_commanded": False,
+            "isolated_base_zero_locked": self.isolated_base_zero_locked,
             "executed_segment": 1,
             "wrist_center_gate_overridden": bool(allow_off_center),
             "empty_cycle": bool(empty_cycle),
+            "stage_start_only": bool(stage_start_only),
             "plan_snapshot": plan,
             "motions": [],
         }
@@ -287,6 +303,11 @@ class ThermalPadExecutor(ThermalPadPlanner):
                     f"{target_name}_{waypoint['index']}",
                     speed,
                 ))
+        if stage_start_only:
+            report["status"] = "stage_1_start_reached"
+            report["gripper_commanded"] = False
+            report["segment_1_executed"] = False
+            return report
         report["gripper_open"] = self.command_gripper(
             float(self.cfg["empty_cycle"].get("open_position", 0.0)),
             "open_before_advance",
@@ -353,9 +374,24 @@ def main() -> int:
         action="store_true",
         help="use collision-checked waypoint compression and shorter settling waits",
     )
+    parser.add_argument(
+        "--isolated-base-zero-locked",
+        action="store_true",
+        help=(
+            "assert that the localhost-only base host has been independently "
+            "verified stationary and latched at zero velocity"
+        ),
+    )
+    parser.add_argument(
+        "--stage-start-only",
+        action="store_true",
+        help="move only to the configured segment-1 start pose; do not command the gripper",
+    )
     args = parser.parse_args()
     if not args.execute:
         parser.error("--execute is required")
+    if args.stage_start_only and not args.empty_cycle:
+        parser.error("--stage-start-only requires --empty-cycle")
     config = json.loads(args.config.read_text(encoding="utf-8"))
     if args.single_depth_frame:
         config["camera"]["temporal_samples"] = 1
@@ -371,6 +407,8 @@ def main() -> int:
             empty_cycle=args.empty_cycle,
             resume_empty_cycle=args.resume_empty_cycle,
             fast=args.fast,
+            isolated_base_zero_locked=args.isolated_base_zero_locked,
+            stage_start_only=args.stage_start_only,
         )
         code = 0
     except Exception as exc:
