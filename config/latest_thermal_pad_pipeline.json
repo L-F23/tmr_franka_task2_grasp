@@ -1,10 +1,14 @@
 {
-  "started_at_unix": 1788408245.879252,
+  "started_at_unix": 1788410680.8787673,
   "execute_authorized": true,
-  "ordered_stages": [],
+  "ordered_stages": [
+    "left_runtime_ready",
+    "left_initial_verified",
+    "thermal_pad_centered",
+    "fk_ik_collision_validation_complete"
+  ],
   "right_arm_commanded": false,
   "gripper_commanded": false,
-  "status": "blocked",
-  "error": "restore_left_initial failed with exit code 1",
-  "completed_at_unix": 1788408252.472264
+  "status": "complete",
+  "completed_at_unix": 1788410685.5370579
 }

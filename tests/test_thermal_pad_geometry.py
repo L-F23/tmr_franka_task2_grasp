@@ -21,6 +21,19 @@ def test_detects_robot_near_pad_end_at_positive_image_x():
     assert found.mask[int(found.center_uv[1]), int(found.center_uv[0])] > 0
 
 
+def test_detects_dim_deep_grey_pad_when_table_merges_with_broad_mask():
+    image = np.full((480, 640, 3), 140, dtype=np.uint8)
+    cv2.rectangle(image, (430, 190), (585, 315), (22, 26, 18), -1)
+    cv2.rectangle(image, (490, 278), (630, 312), (62, 57, 47), -1)
+    # A pale gripper-like occluder touches the pad from below.
+    cv2.rectangle(image, (520, 313), (600, 479), (100, 102, 98), -1)
+    found = detect_pad_end(image, (1.0, 0.0), 0.14)
+    assert found is not None
+    assert abs(found.center_uv[1] - 295) < 8
+    assert found.size_px[0] > 120
+    assert found.grasp_uv[0] > found.center_uv[0]
+
+
 def test_raw_depth_is_registered_into_color_frame():
     intr = Intrinsics(64, 48, 50.0, 50.0, 31.5, 23.5)
     depth = np.full((48, 64), 0.4, dtype=np.float32)

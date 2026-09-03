@@ -15,6 +15,7 @@ import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from franka_msgs.msg import FrankaRobotState
+from franka_spine_msgs.srv import GetPosition
 from geometry_msgs.msg import Pose, PoseStamped
 from moveit_msgs.srv import GetPositionFK, GetPositionIK, GetStateValidity
 from nav_msgs.msg import Odometry
@@ -41,6 +42,7 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = ROOT / "config" / "thermal_pad_pick.json"
 DEFAULT_RECORD = ROOT / "config" / "latest_thermal_pad_ik.json"
 JOINT_NAMES = [f"left_fr3v2_joint{i}" for i in range(1, 8)]
+SPINE_JOINT_NAME = "franka_spine_vertical_joint"
 
 
 class PlanningError(RuntimeError):
@@ -81,6 +83,7 @@ class ThermalPadPlanner(Node):
         self.color_stamp = self.depth_stamp = None
         self.color_info = self.depth_info = self.extrinsics = None
         self.joints = self.robot_state = self.measured_pose = None
+        self.spine_position = None
         self.odom = deque(maxlen=400)
         camera = config["camera"]
         stationary = config["base_stationary_gate"]
@@ -117,6 +120,7 @@ class ThermalPadPlanner(Node):
         self.fk_client = self.create_client(GetPositionFK, kin["fk_service"])
         self.ik_client = self.create_client(GetPositionIK, kin["ik_service"])
         self.validity_client = self.create_client(GetStateValidity, kin["validity_service"])
+        self.spine_client = self.create_client(GetPosition, kin["spine_position_service"])
 
     def _color(self, msg):
         self.color = self.bridge.imgmsg_to_cv2(msg, "bgr8")
@@ -162,10 +166,14 @@ class ThermalPadPlanner(Node):
         return future.result()
 
     def wait_inputs(self, timeout=12.0):
-        services = (self.fk_client, self.ik_client, self.validity_client)
+        services = (self.fk_client, self.ik_client, self.validity_client, self.spine_client)
         for service in services:
             if not service.wait_for_service(timeout_sec=3.0):
                 raise PlanningError(f"service unavailable: {service.srv_name}")
+        spine = self.call(self.spine_client, GetPosition.Request())
+        if not spine.success:
+            raise PlanningError("spine position query failed")
+        self.spine_position = float(spine.position)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             rclpy.spin_once(self, timeout_sec=0.05)
@@ -204,13 +212,19 @@ class ThermalPadPlanner(Node):
             if bool(getattr(errors, name))
         ]
 
-    def fk(self, joints: list[float]):
+    def model_joint_state(self, joints: list[float]) -> tuple[list[str], list[float]]:
+        if self.spine_position is None:
+            raise PlanningError("spine position is unavailable")
+        return JOINT_NAMES + [SPINE_JOINT_NAME], list(map(float, joints)) + [self.spine_position]
+
+    def fk(self, joints: list[float], link: str | None = None):
         kin = self.cfg["kinematics"]
         request = GetPositionFK.Request()
         request.header.frame_id = kin["frame"]
-        request.fk_link_names = [kin["link"]]
-        request.robot_state.joint_state.name = JOINT_NAMES
-        request.robot_state.joint_state.position = list(map(float, joints))
+        request.fk_link_names = [link or kin["link"]]
+        names, positions = self.model_joint_state(joints)
+        request.robot_state.joint_state.name = names
+        request.robot_state.joint_state.position = positions
         request.robot_state.is_diff = True
         response = self.call(self.fk_client, request)
         if response.error_code.val != 1 or not response.pose_stamped:
@@ -231,8 +245,9 @@ class ThermalPadPlanner(Node):
         ik.pose_stamped.pose.orientation.y = quaternion[1]
         ik.pose_stamped.pose.orientation.z = quaternion[2]
         ik.pose_stamped.pose.orientation.w = quaternion[3]
-        ik.robot_state.joint_state.name = JOINT_NAMES
-        ik.robot_state.joint_state.position = list(map(float, seed))
+        names, positions = self.model_joint_state(seed)
+        ik.robot_state.joint_state.name = names
+        ik.robot_state.joint_state.position = positions
         ik.robot_state.is_diff = True
         ik.avoid_collisions = bool(kin["avoid_collisions"])
         timeout_ns = int(float(kin["ik_timeout_s"]) * 1e9)
@@ -248,8 +263,9 @@ class ThermalPadPlanner(Node):
     def state_valid(self, joints: list[float]) -> tuple[bool, list[list[str]]]:
         request = GetStateValidity.Request()
         request.group_name = self.cfg["kinematics"]["group"]
-        request.robot_state.joint_state.name = JOINT_NAMES
-        request.robot_state.joint_state.position = list(map(float, joints))
+        names, positions = self.model_joint_state(joints)
+        request.robot_state.joint_state.name = names
+        request.robot_state.joint_state.position = positions
         request.robot_state.is_diff = True
         response = self.call(self.validity_client, request)
         contacts = [[c.contact_body_1, c.contact_body_2] for c in response.contacts]
@@ -299,23 +315,9 @@ class ThermalPadPlanner(Node):
         initial_error = float(np.max(np.abs(measured - initial)))
         if initial_error > self.cfg["initial_joint_tolerance_rad"]:
             raise PlanningError(f"left arm is not at initial pose ({initial_error:.6f} rad)")
-        sync_error = abs(float(self.color_stamp) - float(self.depth_stamp))
-        if sync_error > self.cfg["camera"]["maximum_sync_error_s"]:
-            raise PlanningError(f"RGB/depth sync error {sync_error:.6f} s")
-
         visual = self.cfg["visual_gate"]
-        observation = detect_pad_end(
-            self.color,
-            tuple(visual["near_robot_end_image_direction"]),
-            visual["endpoint_inset_fraction"],
-        )
-        if observation is None:
-            raise PlanningError("grey thermal pad not detected in left wrist image")
         if visual["center_axis"] != "y":
             raise PlanningError("only the calibrated wrist Y-axis gate is supported")
-        center_error = observation.center_uv[1] - self.color.shape[0] / 2.0
-        if abs(center_error) > visual["center_deadband_px"]:
-            raise PlanningError(f"thermal pad not centered in wrist Y ({center_error:+.2f} px)")
 
         def intrinsics(info):
             projection = info.p if info.p[0] else info.k
@@ -324,29 +326,106 @@ class ThermalPadPlanner(Node):
                 float(projection[5]), float(projection[2]), float(projection[6]),
             )
 
-        point_camera, depth_stats = register_depth_point(
-            self.depth,
-            intrinsics(self.depth_info),
-            intrinsics(self.color_info),
-            np.asarray(self.extrinsics.rotation).reshape(3, 3),
-            np.asarray(self.extrinsics.translation),
-            observation.grasp_uv,
-            observation.mask,
-            radius_px=visual["depth_search_radius_px"],
-            min_depth_m=self.cfg["camera"]["minimum_depth_m"],
-            max_depth_m=self.cfg["camera"]["maximum_depth_m"],
-        )
+        # The thin hanging endpoint is an RGB/depth occlusion edge.  Use a
+        # temporal median and require a majority of samples to agree in 3-D.
+        observations, points, per_frame_depth, sync_errors = [], [], [], []
+        last_pair = None
+        camera_cfg = self.cfg["camera"]
+        deadline = time.monotonic() + camera_cfg["sample_timeout_s"]
+        while len(points) < camera_cfg["temporal_samples"] and time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.06)
+            pair = (self.color_stamp, self.depth_stamp)
+            if pair == last_pair:
+                continue
+            last_pair = pair
+            frame_sync_error = abs(float(self.color_stamp) - float(self.depth_stamp))
+            if frame_sync_error > camera_cfg["maximum_sync_error_s"]:
+                continue
+            observation = detect_pad_end(
+                self.color,
+                tuple(visual["near_robot_end_image_direction"]),
+                visual["endpoint_inset_fraction"],
+            )
+            if observation is None:
+                continue
+            frame_center_error = observation.center_uv[1] - self.color.shape[0] / 2.0
+            if abs(frame_center_error) > visual["center_deadband_px"]:
+                raise PlanningError(
+                    f"thermal pad left wrist Y gate changed ({frame_center_error:+.2f} px)"
+                )
+            try:
+                point, stats = register_depth_point(
+                    self.depth,
+                    intrinsics(self.depth_info),
+                    intrinsics(self.color_info),
+                    np.asarray(self.extrinsics.rotation).reshape(3, 3),
+                    np.asarray(self.extrinsics.translation),
+                    observation.grasp_uv,
+                    observation.mask,
+                    radius_px=visual["depth_search_radius_px"],
+                    min_depth_m=camera_cfg["minimum_depth_m"],
+                    max_depth_m=camera_cfg["maximum_depth_m"],
+                )
+            except ValueError:
+                continue
+            observations.append(observation)
+            points.append(point)
+            per_frame_depth.append(stats)
+            sync_errors.append(frame_sync_error)
+        if len(points) < camera_cfg["minimum_temporal_inliers"]:
+            raise PlanningError(f"only {len(points)} valid synchronized RGB/depth samples")
+        raw_points = np.asarray(points)
+        provisional = np.median(raw_points, axis=0)
+        residuals = np.linalg.norm(raw_points - provisional, axis=1)
+        inlier_mask = residuals <= camera_cfg["maximum_temporal_point_residual_m"]
+        inlier_count = int(np.count_nonzero(inlier_mask))
+        if inlier_count < camera_cfg["minimum_temporal_inliers"]:
+            raise PlanningError(
+                f"unstable temporal depth: {inlier_count}/{len(points)} agreeing samples"
+            )
+        point_camera = np.median(raw_points[inlier_mask], axis=0)
+        point_spread = float(np.max(np.linalg.norm(
+            raw_points[inlier_mask] - point_camera, axis=1
+        )))
+        observation = observations[-1]
+        center_error = float(np.median([
+            item.center_uv[1] - self.color.shape[0] / 2.0 for item in observations
+        ]))
+        sync_error = max(sync_errors)
+        depth_stats = {
+            "temporal_samples": len(points),
+            "temporal_inliers": inlier_count,
+            "maximum_inlier_residual_m": point_spread,
+            "per_frame": per_frame_depth,
+        }
 
         fk_pose = self.fk(self.joints)
+        mount_pose = self.fk(self.joints, self.cfg["kinematics"]["arm_mount_link"])
         fk_position, fk_quaternion = pose_values(fk_pose)
         measured_position, measured_quaternion = pose_values(self.measured_pose.pose)
-        pose_delta = float(np.linalg.norm(np.asarray(fk_position) - np.asarray(measured_position)))
-        orientation_delta = quaternion_angle_deg(fk_quaternion, measured_quaternion)
+        base_from_mount = pose_matrix(*pose_values(mount_pose))
+        mount_from_measured_ee = pose_matrix(measured_position, measured_quaternion)
+        link8_from_measured_ee = np.eye(4)
+        link8_from_measured_ee[:3, 3] = np.asarray(
+            self.cfg["hand_eye"]["link8_to_measured_ee_local_m"], dtype=float
+        )
+        base_from_measured_link8 = (
+            base_from_mount @ mount_from_measured_ee @ np.linalg.inv(link8_from_measured_ee)
+        )
+        base_from_fk_link8 = pose_matrix(fk_position, fk_quaternion)
+        pose_delta = float(np.linalg.norm(
+            base_from_fk_link8[:3, 3] - base_from_measured_link8[:3, 3]
+        ))
+        orientation_delta = math.degrees(math.acos(float(np.clip(
+            (np.trace(base_from_fk_link8[:3, :3].T @ base_from_measured_link8[:3, :3]) - 1.0) / 2.0,
+            -1.0,
+            1.0,
+        ))))
         if pose_delta > 0.03 or orientation_delta > 5.0:
             raise PlanningError(
-                f"hand-eye parent/link8 mismatch ({pose_delta:.4f} m, {orientation_delta:.2f} deg)"
+                f"MoveIt/live link8 mismatch ({pose_delta:.4f} m, {orientation_delta:.2f} deg)"
             )
-        base_from_parent = pose_matrix(measured_position, measured_quaternion)
+        base_from_parent = base_from_mount @ mount_from_measured_ee
         parent_from_camera = np.asarray(
             self.cfg["hand_eye"]["transform_parent_from_color_camera_row_major"], dtype=float
         )
@@ -390,6 +469,7 @@ class ThermalPadPlanner(Node):
             "semantics": "FK/IK and collision validation only; no motion or gripper command sent",
             "base_stationary": True,
             "right_arm_commanded": False,
+            "spine_position_m": self.spine_position,
             "left_arm_initial_error_rad": initial_error,
             "rgb_depth_sync_error_s": sync_error,
             "pad_center_uv": list(observation.center_uv),
@@ -401,6 +481,7 @@ class ThermalPadPlanner(Node):
             "fk_measured_consistency": {
                 "position_error_m": pose_delta,
                 "orientation_error_deg": orientation_delta,
+                "comparison": "MoveIt base->link8 versus live mount->measured_EE with configured flange offset",
             },
             "poses": {
                 "pregrasp_link8_position_m": pregrasp_position.tolist(),

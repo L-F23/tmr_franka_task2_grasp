@@ -53,22 +53,52 @@ def detect_pad_end(
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     choices: list[tuple[float, np.ndarray, tuple]] = []
-    for contour in contours:
-        area = float(cv2.contourArea(contour))
-        if area < max(280.0, 0.0012 * width * height):
-            continue
-        rect = cv2.minAreaRect(contour)
-        (_, _), (a, b), _ = rect
-        long_side, short_side = max(a, b), min(a, b)
-        if short_side < 8 or long_side / max(short_side, 1.0) < 2.2:
-            continue
-        if long_side > 0.58 * width or short_side > 0.24 * height:
-            continue
-        # Prefer an elongated, sizeable region close to the vertical center.
-        cy = float(rect[0][1])
-        score = area * min(long_side / max(short_side, 1.0), 6.0)
-        score /= 1.0 + abs(cy - height / 2.0) / height
-        choices.append((score, contour, rect))
+
+    def add_candidates(source_contours, *, minimum_area: float = 280.0) -> None:
+        for contour in source_contours:
+            area = float(cv2.contourArea(contour))
+            if area < max(minimum_area, 0.0012 * width * height):
+                continue
+            rect = cv2.minAreaRect(contour)
+            (_, _), (a, b), _ = rect
+            long_side, short_side = max(a, b), min(a, b)
+            if short_side < 8 or long_side / max(short_side, 1.0) < 2.2:
+                continue
+            if long_side > 0.58 * width or short_side > 0.24 * height:
+                continue
+            # Prefer an elongated, sizeable region close to the vertical center.
+            cy = float(rect[0][1])
+            score = area * min(long_side / max(short_side, 1.0), 6.0)
+            score /= 1.0 + abs(cy - height / 2.0) / height
+            choices.append((score, contour, rect))
+
+    add_candidates(contours)
+    if not choices:
+        # Under the deployed wrist lighting, the white table can be as dark as
+        # V~=140 and merges into the broad low-saturation mask above.  The pad
+        # remains a mildly chromatic deep-grey strip (roughly V=45..90,
+        # S=35..110), distinct from both the black base and the pale table.
+        fallback = np.uint8(
+            (value >= 45) & (value <= 95) &
+            (saturation >= 30) & (saturation <= 115)
+        ) * 255
+        fallback_allowed = np.zeros_like(fallback)
+        fallback_allowed[
+            int(0.08 * height):int(0.88 * height), int(0.35 * width):
+        ] = 255
+        fallback &= fallback_allowed
+        fallback = cv2.morphologyEx(
+            fallback, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)
+        )
+        fallback = cv2.morphologyEx(
+            fallback, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8)
+        )
+        fallback_contours, _ = cv2.findContours(
+            fallback, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        mask = fallback
+        add_candidates(fallback_contours)
+
     if not choices:
         return None
 

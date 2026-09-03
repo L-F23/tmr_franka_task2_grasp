@@ -5,21 +5,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from pathlib import Path
 import subprocess
 import time
 import cv2
 
 from alignment_detector import (
+    Target,
     detect_main_hint,
     detect_occluded_grey_pad,
     detect_target,
     horizontal_decision,
     wrist_vertical_robot_decision,
 )
+from thermal_pad_geometry import detect_pad_end
 
 VIEWER = "http://127.0.0.1:18081"
-MOVE_SCRIPT = "/home/aup/tmr-mobile-manipulation/base/scripts/12_translate_right_odom_only.py"
-ROS_SETUP = "source /home/aup/tmr_env.sh"
+MOVE_SCRIPT = Path(__file__).resolve().with_name("guarded_lateral_step.py")
 BASE_HOST = "tmr-user@172.16.0.50"
 BASE_ENV = (
     "source /opt/ros/humble/setup.bash; source ~/ros2_ws/install/setup.bash; "
@@ -49,17 +52,34 @@ def radar_ready() -> bool:
 def move_right(distance_m: float, allow_odom_only: bool = False) -> None:
     if not allow_odom_only and not radar_ready():
         raise RuntimeError("dual-radar safety gate unavailable; zero motion commanded")
-    command = (
-        f"{BASE_ENV}; cd ~/tmr_cycle; python3 scripts/12_translate_right_odom_only.py "
-        f"--distance-m {distance_m:.5f} "
-        "--speed-mps 0.025 --timeout-s 8"
+    if allow_odom_only:
+        command = (
+            f"{BASE_ENV}; cd ~/tmr_cycle; python3 scripts/12_translate_right_odom_only.py "
+            f"--distance-m {distance_m:.5f} "
+            "--speed-mps 0.025 --timeout-s 8"
+        )
+        subprocess.run(["ssh", BASE_HOST, command], check=True)
+        return
+    subprocess.run(
+        [
+            "/usr/bin/python3", "-u", str(MOVE_SCRIPT),
+            "--right-m", f"{distance_m:.5f}",
+            "--speed-mps", "0.025", "--timeout-s", "8",
+        ],
+        env=os.environ.copy(),
+        check=True,
     )
-    subprocess.run(["ssh", BASE_HOST, command], check=True)
 
 
 def observe() -> dict:
     main, wrist = frame("main"), frame("left")
-    wrist_target = detect_target(wrist) or detect_occluded_grey_pad(wrist)
+    pad = detect_pad_end(wrist)
+    wrist_target = (
+        Target(pad.center_uv, (0, 0, 0, 0), pad.area_px,
+               min(1.0, 0.65 + pad.area_px / 12000.0))
+        if pad is not None
+        else detect_target(wrist) or detect_occluded_grey_pad(wrist)
+    )
     main_target = detect_target(main) or detect_main_hint(main)
     selected = wrist_target if wrist_target else main_target
     source = "wrist" if wrist_target else "main"
@@ -68,6 +88,10 @@ def observe() -> dict:
         if wrist_target
         else horizontal_decision(main_target, main.shape[1])
     )
+    # Main-camera centering is only search guidance.  The hand-off to IK is
+    # permitted exclusively by the left-wrist Y-centering gate.
+    if not wrist_target and decision == "centered":
+        decision = "not_visible"
     return {
         "source": source,
         "decision": decision,

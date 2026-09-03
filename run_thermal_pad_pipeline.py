@@ -12,7 +12,7 @@ import time
 
 
 ROOT = Path(__file__).resolve().parent
-RESTORE = Path("/home/aup/tmr-mobile-manipulation/grasp/scripts/restore_left_pick_initial.py")
+RESTORE = ROOT / "restore_left_initial_direct.py"
 
 
 def run(command: list[str], label: str, timeout: float) -> dict:
@@ -55,6 +55,12 @@ def main() -> int:
     }
     try:
         if args.execute:
+            run(
+                ["/usr/bin/python3", "-u", str(ROOT / "bootstrap_left_runtime.py"), "--state-only"],
+                "bootstrap_left_runtime",
+                45.0,
+            )
+            record["ordered_stages"].append("left_runtime_ready")
             run(["/usr/bin/python3", "-u", str(RESTORE)], "restore_left_initial", 150.0)
             record["ordered_stages"].append("left_initial_verified")
         else:
