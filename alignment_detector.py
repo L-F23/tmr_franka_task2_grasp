@@ -101,3 +101,26 @@ def detect_main_hint(image: np.ndarray) -> Target | None:
         center = (moments["m10"] / moments["m00"], moments["m01"] / moments["m00"])
         choices.append(Target(center, (x, y, w, h), area, min(1.0, 0.6 + dark_fraction)))
     return max(choices, key=lambda item: item.confidence) if choices else None
+
+
+def detect_occluded_grey_pad(image: np.ndarray) -> Target | None:
+    """Fallback when the base contour merges with a nearby gripper silhouette."""
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    value, saturation = hsv[:, :, 2], hsv[:, :, 1]
+    height, width = image.shape[:2]
+    mask = np.uint8((value >= 45) & (value <= 120) & (saturation < 70)) * 255
+    allowed = np.zeros_like(mask)
+    allowed[int(.08*height):int(.88*height), int(.30*width):] = 255
+    mask = cv2.morphologyEx(mask & allowed, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    choices = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        x, y, w, h = cv2.boundingRect(contour)
+        ratio = max(w / max(h, 1), h / max(w, 1))
+        if area < 500 or not 2.5 <= ratio <= 6.5:
+            continue
+        moments = cv2.moments(contour)
+        center = (moments["m10"] / moments["m00"], moments["m01"] / moments["m00"])
+        choices.append(Target(center, (x, y, w, h), area, min(1.0, .65 + area / 12000)))
+    return max(choices, key=lambda item: item.confidence) if choices else None

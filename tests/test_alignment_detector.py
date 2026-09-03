@@ -3,6 +3,7 @@ import numpy as np
 
 from alignment_detector import (
     detect_main_hint,
+    detect_occluded_grey_pad,
     detect_target,
     horizontal_decision,
     wrist_vertical_robot_decision,
@@ -46,3 +47,13 @@ def test_wrist_vertical_axis_maps_up_to_robot_left():
     assert wrist_vertical_robot_decision(target, 480) == "move_left"
     target = type("T", (), {"center": (500.0, 360.0)})()
     assert wrist_vertical_robot_decision(target, 480) == "move_right"
+
+
+def test_detects_pad_when_black_base_merges_with_gripper():
+    image = np.full((480, 640, 3), 170, np.uint8)
+    cv2.rectangle(image, (460, 180), (639, 300), (15, 15, 15), -1)
+    cv2.rectangle(image, (495, 245), (635, 280), (90, 90, 90), -1)
+    cv2.rectangle(image, (610, 270), (639, 479), (15, 15, 15), -1)
+    target = detect_occluded_grey_pad(image)
+    assert target is not None
+    assert 250 < target.center[1] < 275

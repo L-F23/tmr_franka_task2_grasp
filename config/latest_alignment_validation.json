@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-09-03T11:32:10+08:00",
+  "recorded_at": "2026-09-03T11:36:30+08:00",
   "camera_health": {
     "main": true,
     "left_wrist": true
@@ -12,18 +12,19 @@
   },
   "left_wrist_camera": {
     "target_visible": true,
-    "target_center_px": [618.6489, 111.3156],
+    "target_center_px": [567.5548, 271.8645],
     "image_size_px": [640, 480],
-    "confidence": 0.8957,
+    "confidence": 0.8735,
     "controlled_image_axis": "y",
     "calibration": "image_up/down maps to robot_left/right",
-    "decision": "move_left"
+    "decision": "centered"
   },
   "execution": {
     "requested": true,
     "motion_commanded": false,
-    "result": "left_arm_incremental_ptp_rejected",
-    "ptp_status": 3,
-    "motion_completed": false
+    "result": "centered_by_base_lateral_motion",
+    "actuator": "mobile_base",
+    "robot_left_displacement_m": 0.1084,
+    "motion_completed": true
   }
 }
