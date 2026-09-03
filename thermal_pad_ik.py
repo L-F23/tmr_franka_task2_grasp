@@ -16,8 +16,9 @@ import rclpy
 from cv_bridge import CvBridge
 from franka_msgs.msg import FrankaRobotState
 from franka_spine_msgs.srv import GetPosition
-from geometry_msgs.msg import Pose, PoseStamped
-from moveit_msgs.srv import GetPositionFK, GetPositionIK, GetStateValidity
+from geometry_msgs.msg import PoseStamped
+from moveit_msgs.msg import Constraints, JointConstraint
+from moveit_msgs.srv import GetMotionPlan, GetPositionFK, GetPositionIK, GetStateValidity
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import (
@@ -126,6 +127,9 @@ class ThermalPadPlanner(Node):
         self.fk_client = self.create_client(GetPositionFK, kin["fk_service"])
         self.ik_client = self.create_client(GetPositionIK, kin["ik_service"])
         self.validity_client = self.create_client(GetStateValidity, kin["validity_service"])
+        self.motion_plan_client = self.create_client(
+            GetMotionPlan, kin.get("motion_plan_service", "/left_ik/plan_kinematic_path")
+        )
         self.spine_client = self.create_client(GetPosition, kin["spine_position_service"])
 
     def _color(self, msg):
@@ -172,7 +176,13 @@ class ThermalPadPlanner(Node):
         return future.result()
 
     def wait_inputs(self, timeout=12.0):
-        services = (self.fk_client, self.ik_client, self.validity_client, self.spine_client)
+        services = (
+            self.fk_client,
+            self.ik_client,
+            self.validity_client,
+            self.motion_plan_client,
+            self.spine_client,
+        )
         for service in services:
             if not service.wait_for_service(timeout_sec=3.0):
                 raise PlanningError(f"service unavailable: {service.srv_name}")
@@ -298,6 +308,10 @@ class ThermalPadPlanner(Node):
             solution = self.ik(position, quaternion, previous)
             joint_step = max(abs(a - b) for a, b in zip(solution, previous))
             if joint_step > self.cfg["kinematics"]["maximum_joint_step_rad"]:
+                if label == "staging_above_pick":
+                    return self.plan_pose_transition(
+                        label, target_position, target_quaternion, seed
+                    )
                 raise PlanningError(f"{label} IK discontinuity {joint_step:.6f} rad")
             interpolation_samples = self.cfg["kinematics"]["path_samples_between_waypoints"]
             for subindex, interpolated in enumerate(
@@ -319,6 +333,87 @@ class ThermalPadPlanner(Node):
             previous = solution
         return result, previous
 
+    def plan_pose_transition(self, label, target_position, target_quaternion, seed):
+        """Use OMPL for the large initial wrist reorientation without IK branch jumps."""
+        kin = self.cfg["kinematics"]
+        candidates = []
+        for _ in range(int(kin.get("ik_candidate_attempts", 64))):
+            try:
+                candidate = self.ik(target_position, target_quaternion, seed)
+            except PlanningError:
+                continue
+            valid, _ = self.state_valid(candidate)
+            if valid:
+                candidates.append(candidate)
+                if len(candidates) >= int(kin.get("minimum_ik_candidates", 12)):
+                    break
+        if not candidates:
+            raise PlanningError(f"{label} has no valid IK candidate")
+        target_joints = min(
+            candidates,
+            key=lambda values: max(abs(a - b) for a, b in zip(values, seed)),
+        )
+        request = GetMotionPlan.Request()
+        motion = request.motion_plan_request
+        motion.group_name = kin["group"]
+        motion.pipeline_id = "ompl"
+        motion.num_planning_attempts = 6
+        motion.allowed_planning_time = 6.0
+        motion.max_velocity_scaling_factor = 0.08
+        motion.max_acceleration_scaling_factor = 0.08
+        names, positions = self.model_joint_state(seed)
+        motion.start_state.joint_state.name = names
+        motion.start_state.joint_state.position = positions
+        motion.start_state.is_diff = True
+
+        goal = Constraints()
+        for name, value in zip(JOINT_NAMES, target_joints):
+            constraint = JointConstraint()
+            constraint.joint_name = name
+            constraint.position = float(value)
+            constraint.tolerance_above = 0.002
+            constraint.tolerance_below = 0.002
+            constraint.weight = 1.0
+            goal.joint_constraints.append(constraint)
+        motion.goal_constraints = [goal]
+
+        response = self.call(self.motion_plan_client, request, timeout=9.0)
+        plan = response.motion_plan_response
+        if plan.error_code.val != 1:
+            raise PlanningError(f"{label} OMPL failed, MoveIt code {plan.error_code.val}")
+        trajectory = plan.trajectory.joint_trajectory
+        mapped_indices = {name: index for index, name in enumerate(trajectory.joint_names)}
+        if not all(name in mapped_indices for name in JOINT_NAMES):
+            raise PlanningError(f"{label} OMPL trajectory is missing left-arm joints")
+
+        result = []
+        previous = list(seed)
+        maximum_step = float(kin["maximum_joint_step_rad"])
+        for trajectory_point in trajectory.points:
+            target = [
+                float(trajectory_point.positions[mapped_indices[name]]) for name in JOINT_NAMES
+            ]
+            delta = max(abs(a - b) for a, b in zip(target, previous))
+            subdivisions = max(1, int(math.ceil(delta / maximum_step)))
+            for joints in interpolate(np.asarray(previous), np.asarray(target), subdivisions):
+                valid, contacts = self.state_valid(joints.tolist())
+                if not valid:
+                    raise PlanningError(f"{label} OMPL path collides: {contacts}")
+                step = max(abs(a - b) for a, b in zip(joints, previous))
+                result.append({
+                    "index": len(result) + 1,
+                    "position_m": None,
+                    "orientation_xyzw": None,
+                    "joint_positions_rad": joints.tolist(),
+                    "maximum_joint_step_rad": step,
+                    "collision_checked_interpolation_samples": 1,
+                    "planner": "ompl_initial_pose_transition",
+                })
+                previous = joints.tolist()
+        if not result:
+            raise PlanningError(f"{label} OMPL returned an empty trajectory")
+        return result, previous
+
     def solve_cartesian_segment(self, label, start_position, target_position, quaternion, seed):
         return self.solve_pose_segment(
             label, start_position, target_position, quaternion, quaternion, seed
@@ -335,7 +430,13 @@ class ThermalPadPlanner(Node):
             raise PlanningError(f"{label} joint path has {len(invalid)} invalid samples")
         return samples
 
-    def plan(self, annotated_output: Path | None = None) -> dict:
+    def plan(
+        self,
+        annotated_output: Path | None = None,
+        *,
+        max_segment: int = 2,
+        require_center: bool = True,
+    ) -> dict:
         self.wait_inputs()
         if not self.base_stationary():
             raise PlanningError("base stationary gate changed after capture")
@@ -386,7 +487,7 @@ class ThermalPadPlanner(Node):
             if observation is None:
                 continue
             frame_center_error = observation.center_uv[1] - self.color.shape[0] / 2.0
-            if abs(frame_center_error) > visual["center_deadband_px"]:
+            if require_center and abs(frame_center_error) > visual["center_deadband_px"]:
                 raise PlanningError(
                     f"thermal pad left wrist Y gate changed ({frame_center_error:+.2f} px)"
                 )
@@ -486,13 +587,23 @@ class ThermalPadPlanner(Node):
         previous_position = current_position
         previous_orientation = fk_quaternion
         previous_joints = list(self.joints)
-        for target in sequence["targets"]:
+        selected_targets = [
+            target for target in sequence["targets"]
+            if int(target["segment"]) <= int(max_segment)
+        ]
+        for target in selected_targets:
             target_position = np.asarray(target["position_m"], dtype=float)
             target_orientation = target["orientation_xyzw"]
-            segment, previous_joints = self.solve_pose_segment(
-                target["name"], previous_position, target_position,
-                previous_orientation, target_orientation, previous_joints,
-            )
+            try:
+                segment, previous_joints = self.solve_pose_segment(
+                    target["name"], previous_position, target_position,
+                    previous_orientation, target_orientation, previous_joints,
+                )
+            except PlanningError as exc:
+                raise PlanningError(
+                    f"{exc}; target_position_m={target_position.tolist()}; "
+                    f"target_orientation_xyzw={target_orientation}"
+                ) from exc
             sequence_plans[target["name"]] = segment
             previous_position = target_position
             previous_orientation = target_orientation
@@ -515,6 +626,8 @@ class ThermalPadPlanner(Node):
             "semantics": "FK/IK and collision validation only; no motion or gripper command sent",
             "base_stationary": True,
             "right_arm_commanded": False,
+            "planning_scope_max_segment": int(max_segment),
+            "wrist_center_gate_required": bool(require_center),
             "spine_position_m": self.spine_position,
             "left_arm_initial_error_rad": initial_error,
             "rgb_depth_sync_error_s": sync_error,
@@ -547,12 +660,24 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
     parser.add_argument("--annotated-output", type=Path, default=ROOT / "outputs" / "thermal_pad_ik.jpg")
+    parser.add_argument("--max-segment", type=int, choices=(1, 2), default=2)
+    parser.add_argument("--allow-off-center", action="store_true")
+    parser.add_argument("--single-depth-frame", action="store_true")
     args = parser.parse_args()
     config = json.loads(args.config.read_text(encoding="utf-8"))
+    if args.single_depth_frame:
+        config["camera"]["temporal_samples"] = 1
+        config["camera"]["minimum_temporal_inliers"] = 1
+        config["camera"]["maximum_sync_error_s"] = 10.0
+        config["camera"]["maximum_temporal_point_residual_m"] = 10.0
     rclpy.init()
     node = ThermalPadPlanner(config)
     try:
-        result = node.plan(args.annotated_output)
+        result = node.plan(
+            args.annotated_output,
+            max_segment=args.max_segment,
+            require_center=not args.allow_off_center,
+        )
         args.record.parent.mkdir(parents=True, exist_ok=True)
         args.record.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(result, indent=2), flush=True)
