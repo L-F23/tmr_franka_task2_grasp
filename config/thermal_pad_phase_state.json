@@ -1,0 +1,33 @@
+{
+  "stage_1": {
+    "status": "complete",
+    "terminal_event": "left_gripper_closed_on_thermal_pad",
+    "joint_positions_rad": [
+      0.2014579474925995,
+      1.4887068271636963,
+      0.3888980746269226,
+      -1.8668677806854248,
+      2.876264810562134,
+      1.201541781425476,
+      -1.0671190023422241
+    ],
+    "base_position_recorded": false
+  },
+  "stage_2": {
+    "status": "vertical_lift_complete",
+    "action": "vertical_lift_12cm",
+    "requested_lift_m": 0.12,
+    "actual_lift_m": 0.1199774691474042,
+    "joint_positions_rad": [
+      0.0428275428712368,
+      1.211555004119873,
+      0.3207400143146515,
+      -2.1850738525390625,
+      2.8134119510650635,
+      1.1766576766967773,
+      -0.9964920282363892
+    ],
+    "gripper_position": 0.7894070484581498,
+    "active_errors": []
+  }
+}

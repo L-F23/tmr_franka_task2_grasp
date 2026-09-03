@@ -19,3 +19,9 @@ def test_offset_targets_allow_forward_motion():
     forward, lowered = offset_targets([0.8, -0.1, 0.9], 0.0, 0.0, 0.025)
     assert np.allclose(forward, [0.825, -0.1, 0.9])
     assert np.allclose(lowered, forward)
+
+
+def test_offset_targets_allow_vertical_lift():
+    after_x, lifted = offset_targets([0.8, -0.1, 0.9], 0.0, 0.0, 0.0, 0.12)
+    assert np.allclose(after_x, [0.8, -0.1, 0.9])
+    assert np.allclose(lifted, [0.8, -0.1, 1.02])
