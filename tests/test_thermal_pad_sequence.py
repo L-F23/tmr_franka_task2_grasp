@@ -18,9 +18,9 @@ CONFIG = {
     "segment_1_terminal_target": "carry_far_12cm",
     "open_advance_m": 0.06,
     "staging_clearance_z_m": 0.08,
-    "lift_vertical_m": 0.22,
+    "lift_vertical_m": 0.12,
     "carry_far_m": 0.12,
-    "pre_place_lower_m": 0.02,
+    "pre_place_lower_m": 0.22,
     "diagonal_down_m": 0.08,
     "diagonal_inward_m": 0.06,
     "release_inward_m": 0.05,
@@ -43,16 +43,16 @@ def test_sequence_preserves_requested_exact_displacements() -> None:
 
     assert np.allclose(target["pick_height_retracted"]["position_m"], [0.94, 0.1, 0.75])
     assert np.allclose(target["advance_open_to_pad"]["position_m"], grasp)
-    assert np.allclose(target["lift_vertical_22cm"]["position_m"], grasp + [0, 0, 0.22])
+    assert np.allclose(target["lift_vertical_12cm"]["position_m"], grasp + [0, 0, 0.12])
     assert np.allclose(
         np.asarray(target["carry_far_12cm"]["position_m"])
-        - np.asarray(target["lift_vertical_22cm"]["position_m"]),
+        - np.asarray(target["lift_vertical_12cm"]["position_m"]),
         [0.12, 0.0, 0.0],
     )
     assert np.allclose(
-        np.asarray(target["lower_vertical_2cm"]["position_m"])
+        np.asarray(target["lower_vertical_22cm"]["position_m"])
         - np.asarray(target["carry_far_12cm"]["position_m"]),
-        [0.0, 0.0, -0.02],
+        [0.0, 0.0, -0.22],
     )
 
 
@@ -86,7 +86,7 @@ def test_sequence_is_split_after_step_six() -> None:
     assert first["terminal_target"] == "carry_far_12cm"
     assert first["terminal_behavior"].startswith("hold_pose")
     assert second["steps"] == [7, 8, 9, 10]
-    assert second["target_names"][0] == "lower_vertical_2cm"
+    assert second["target_names"][0] == "lower_vertical_22cm"
     assert all(target["segment"] == 1 for target in sequence["targets"][:5])
     assert all(target["segment"] == 2 for target in sequence["targets"][5:])
 

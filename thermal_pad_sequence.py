@@ -131,9 +131,9 @@ def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
     staging = pick_level + up * float(config["staging_clearance_z_m"])
     lifted = grasp + up * float(config["lift_vertical_m"])
     carried_far = lifted + forward * float(config["carry_far_m"])
-    lowered_2cm = carried_far - up * float(config["pre_place_lower_m"])
+    lowered_for_place = carried_far - up * float(config["pre_place_lower_m"])
     diagonal = (
-        lowered_2cm
+        lowered_for_place
         - up * float(config["diagonal_down_m"])
         - forward * float(config["diagonal_inward_m"])
     )
@@ -159,10 +159,10 @@ def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
              semantics="same ground-frame Z as the previously detected grasp endpoint"),
         pose("advance_open_to_pad", grasp, 1, 3,
              semantics="advance along ground-frame +X while gripper remains open"),
-        pose("lift_vertical_22cm", lifted, 1, 5),
+        pose("lift_vertical_12cm", lifted, 1, 5),
         pose("carry_far_12cm", carried_far, 1, 6,
              semantics="segment 1 ends here and holds this pose"),
-        pose("lower_vertical_2cm", lowered_2cm, 2, 7),
+        pose("lower_vertical_22cm", lowered_for_place, 2, 7),
         pose("lower_and_retract", diagonal, 2, 8,
              semantics="simultaneous ground-frame -Z and -X translation"),
         pose(
@@ -211,9 +211,9 @@ def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
         "events": [
             {"step": 3, "after_target": "pick_height_retracted", "command": "open_gripper"},
             {"step": 4, "after_target": "advance_open_to_pad", "command": "close_gripper"},
-            {"step": 5, "after_target": "lift_vertical_22cm", "command": "verify_object_held"},
+            {"step": 5, "after_target": "lift_vertical_12cm", "command": "verify_object_held"},
             {"step": 6, "after_target": "carry_far_12cm", "command": "hold_and_end_segment_1"},
-            {"step": 7, "before_target": "lower_vertical_2cm", "command": "authorize_segment_2"},
+            {"step": 7, "before_target": "lower_vertical_22cm", "command": "authorize_segment_2"},
             {"step": 9, "after_target": "lower_and_retract", "command": "open_gripper"},
             {"step": 10, "after_target": "tilt_forward_and_retract_release", "command": "verify_release"},
         ],
