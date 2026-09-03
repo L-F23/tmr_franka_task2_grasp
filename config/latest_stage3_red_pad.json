@@ -1,0 +1,178 @@
+{
+  "status": "stage_3_complete_coarse_red_station",
+  "known_distances_from_black_base_cm": [
+    19.5,
+    32.9,
+    44.6,
+    58.0
+  ],
+  "main_layout": {
+    "pairs": [
+      {
+        "color": "red",
+        "center_px": [
+          790.0,
+          441.0
+        ],
+        "distance_from_black_base_cm": 19.5
+      },
+      {
+        "color": "green",
+        "center_px": [
+          893.5,
+          444.0
+        ],
+        "distance_from_black_base_cm": 32.9
+      },
+      {
+        "color": "green",
+        "center_px": [
+          990.0,
+          446.0
+        ],
+        "distance_from_black_base_cm": 44.6
+      },
+      {
+        "color": "green",
+        "center_px": [
+          1099.5,
+          447.0
+        ],
+        "distance_from_black_base_cm": 58.0
+      }
+    ],
+    "linear_distance_cm_from_main_x_px": {
+      "slope_cm_per_px": 0.12409377809276019,
+      "intercept_cm": -78.30145618599599,
+      "rmse_cm": 0.21256867583253425
+    },
+    "red_station_distance_cm": 19.5
+  },
+  "main_detections": [
+    {
+      "color": "red",
+      "center_px": [
+        790.0,
+        441.0
+      ],
+      "bbox_xywh": [
+        775,
+        406,
+        30,
+        70
+      ],
+      "area_px": 419.0,
+      "fill_ratio": 0.36975706802595026,
+      "mean_saturation": 162.47,
+      "confidence": 0.4602515732286614
+    },
+    {
+      "color": "green",
+      "center_px": [
+        893.5,
+        444.0
+      ],
+      "bbox_xywh": [
+        869,
+        404,
+        49,
+        80
+      ],
+      "area_px": 1867.0,
+      "fill_ratio": 0.8369038696732635,
+      "mean_saturation": 149.09867751780266,
+      "confidence": 0.7730971784885178
+    },
+    {
+      "color": "green",
+      "center_px": [
+        990.0,
+        446.0
+      ],
+      "bbox_xywh": [
+        960,
+        406,
+        60,
+        80
+      ],
+      "area_px": 1878.0,
+      "fill_ratio": 0.8100944025798519,
+      "mean_saturation": 148.0025278058645,
+      "confidence": 0.7581879257293478
+    },
+    {
+      "color": "green",
+      "center_px": [
+        1099.5,
+        447.0
+      ],
+      "bbox_xywh": [
+        1061,
+        408,
+        77,
+        78
+      ],
+      "area_px": 1811.0,
+      "fill_ratio": 0.7960367673489099,
+      "mean_saturation": 136.9267782426778,
+      "confidence": 0.7359570989095029
+    }
+  ],
+  "base_steps": [
+    {
+      "status": "success",
+      "requested_right_m": 0.08,
+      "actual_right_m": 0.07549527674058433,
+      "error_m": -0.004504723259415672,
+      "yaw_error_deg": 0.0037385935782235174,
+      "minimum_directional_clearance_m": 1.5274158443209729
+    },
+    {
+      "status": "success",
+      "requested_right_m": 0.08,
+      "actual_right_m": 0.07562385188319459,
+      "error_m": -0.004376148116805409,
+      "yaw_error_deg": -0.004018411450452905,
+      "minimum_directional_clearance_m": 1.4454675533630141
+    },
+    {
+      "status": "success",
+      "requested_right_m": 0.035,
+      "actual_right_m": 0.030543720168300623,
+      "error_m": -0.00445627983169938,
+      "yaw_error_deg": 0.009209511942279487,
+      "minimum_directional_clearance_m": 1.424486913264515
+    },
+    {
+      "status": "success",
+      "requested_right_m": 0.01,
+      "actual_right_m": 0.005633833118708399,
+      "error_m": -0.004366166881291601,
+      "yaw_error_deg": -0.009946034141615693,
+      "minimum_directional_clearance_m": 1.4085015615800216
+    }
+  ],
+  "wrist_observations": [
+    {
+      "visible": true,
+      "center_px": [
+        438.5,
+        343.5
+      ],
+      "y_error_px": 103.5,
+      "centered": false,
+      "confidence": 0.38835018819210537,
+      "image_height": 480
+    },
+    {
+      "visible": false,
+      "image_height": 480
+    }
+  ],
+  "wrist_role": "advisory_only",
+  "operator_stop_acknowledged": true,
+  "right_arm_commanded": false,
+  "left_arm_commanded": false,
+  "spine_commanded": false,
+  "closed_loop_note": "wrist optical axis did not view the table; no further correction was commanded"
+}

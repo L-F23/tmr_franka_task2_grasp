@@ -29,5 +29,14 @@
     ],
     "gripper_position": 0.7894070484581498,
     "active_errors": []
+  },
+  "stage_3": {
+    "status": "complete",
+    "action": "red_pad_coarse_station_search",
+    "red_station_distance_from_black_base_cm": 19.5,
+    "actual_total_right_motion_m": 0.18729668191078794,
+    "wrist_role": "advisory_only",
+    "wrist_table_view_available": false,
+    "terminal_behavior": "base_stopped_waiting_for_next_stage"
   }
 }
