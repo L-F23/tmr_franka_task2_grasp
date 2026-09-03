@@ -73,7 +73,7 @@ def observe() -> dict:
     # Main-camera centering is only search guidance.  The hand-off to IK is
     # permitted exclusively by the left-wrist Y-centering gate.
     if not wrist_target and decision == "centered":
-        decision = "not_visible"
+        decision = "search_from_main_center"
     return {
         "source": source,
         "decision": decision,
@@ -92,8 +92,15 @@ def main() -> int:
     parser.add_argument("--maximum-steps", type=int, default=12)
     parser.add_argument("--step-m", type=float, default=0.02)
     parser.add_argument("--allow-odom-only", action="store_true")
+    parser.add_argument(
+        "--main-centered-search-direction",
+        choices=("move_left", "move_right"),
+        default="move_left",
+        help="calibrated hand-off direction until the wrist target enters view",
+    )
     args = parser.parse_args()
     history = []
+    last_main_direction = None
     for _ in range(args.maximum_steps):
         state = observe()
         history.append(state)
@@ -106,8 +113,13 @@ def main() -> int:
             return 0
         if state["decision"] == "not_visible":
             raise RuntimeError("target absent from both cameras; search direction is ambiguous")
+        decision = state["decision"]
+        if state["source"] == "main" and decision in ("move_left", "move_right"):
+            last_main_direction = decision
+        if decision == "search_from_main_center":
+            decision = last_main_direction or args.main_centered_search_direction
         move_right(
-            args.step_m if state["decision"] == "move_right" else -args.step_m,
+            args.step_m if decision == "move_right" else -args.step_m,
             allow_odom_only=args.allow_odom_only,
         )
         time.sleep(0.5)

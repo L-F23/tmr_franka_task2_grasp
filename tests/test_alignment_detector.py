@@ -9,7 +9,7 @@ from alignment_detector import (
     horizontal_decision,
     wrist_vertical_robot_decision,
 )
-from align_to_thermal_pad import main_table_target
+from align_to_thermal_pad import main_table_target, observe
 
 
 def test_detects_grey_pad_on_black_base_and_requests_right():
@@ -72,3 +72,16 @@ def test_main_target_rejects_candidate_above_table_band(monkeypatch):
     candidate = Target((300.0, 70.0), (220, 20, 160, 120), 12000.0, 0.8)
     monkeypatch.setattr("align_to_thermal_pad.detect_target", lambda _: candidate)
     assert main_table_target(image) is None
+
+
+def test_main_center_is_search_handoff_not_not_visible(monkeypatch):
+    image = np.full((720, 1280, 3), 170, np.uint8)
+    target = Target((640.0, 400.0), (600, 360, 80, 80), 6400.0, 0.9)
+    monkeypatch.setattr("align_to_thermal_pad.frame", lambda _: image)
+    monkeypatch.setattr("align_to_thermal_pad.detect_target", lambda _: None)
+    monkeypatch.setattr("align_to_thermal_pad.detect_occluded_grey_pad", lambda _: None)
+    monkeypatch.setattr("align_to_thermal_pad.main_table_target", lambda _: target)
+    state = observe()
+    assert state["main_visible"] is True
+    assert state["wrist_visible"] is False
+    assert state["decision"] == "search_from_main_center"

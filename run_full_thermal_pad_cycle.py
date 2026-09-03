@@ -77,6 +77,10 @@ def main() -> int:
     parser.add_argument("--maximum-alignment-steps", type=int, default=20)
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
     parser.add_argument("--prepared-record", type=Path)
+    parser.add_argument(
+        "--resume-after-transport", action="store_true",
+        help="resume at visual alignment after a completed initial base transport",
+    )
     args = parser.parse_args()
     if not args.execute:
         print(json.dumps({
@@ -138,10 +142,15 @@ def main() -> int:
             record["stage_results"].append({"label": "quick_start_base_runtime_reused"})
         record["ordered_stages"].append(FULL_STAGE_ORDER[2])
 
-        transport_result = guarded_move_right_continuous(args.initial_right_m)
-        record["base_transport_steps"].append(transport_result)
-        print(json.dumps({"continuous_base_transport": transport_result}), flush=True)
-        record["actual_initial_right_m"] = float(transport_result["actual_right_m"])
+        if args.resume_after_transport:
+            transport_result = {"status": "reused", "motion_commanded": False}
+            record["base_transport_steps"].append(transport_result)
+            record["actual_initial_right_m"] = None
+        else:
+            transport_result = guarded_move_right_continuous(args.initial_right_m)
+            record["base_transport_steps"].append(transport_result)
+            print(json.dumps({"continuous_base_transport": transport_result}), flush=True)
+            record["actual_initial_right_m"] = float(transport_result["actual_right_m"])
         record["ordered_stages"].append(FULL_STAGE_ORDER[3])
 
         record["stage_results"].append(run(
