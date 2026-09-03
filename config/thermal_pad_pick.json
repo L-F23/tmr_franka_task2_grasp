@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "camera": {
+    "color_topic": "/wrist_camera_left/color/image_rect_raw",
+    "depth_topic": "/wrist_camera_left/depth/image_rect_raw",
+    "color_info_topic": "/wrist_camera_left/color/camera_info",
+    "depth_info_topic": "/wrist_camera_left/depth/camera_info",
+    "extrinsics_topic": "/wrist_camera_left/extrinsics/depth_to_color",
+    "maximum_sync_error_s": 0.1,
+    "minimum_depth_m": 0.08,
+    "maximum_depth_m": 0.8,
+    "depth_scale_m": 0.001
+  },
+  "visual_gate": {
+    "center_axis": "y",
+    "center_deadband_px": 35,
+    "near_robot_end_image_direction": [1.0, 0.0],
+    "endpoint_inset_fraction": 0.14,
+    "depth_search_radius_px": 7
+  },
+  "base_stationary_gate": {
+    "odom_topic": "/swerve_drive_controller/odom",
+    "required_duration_s": 1.0,
+    "maximum_linear_speed_m_s": 0.006,
+    "maximum_angular_speed_rad_s": 0.012
+  },
+  "kinematics": {
+    "frame": "base",
+    "group": "left_arm",
+    "link": "left_fr3v2_link8",
+    "fk_service": "/left_ik/compute_fk",
+    "ik_service": "/left_ik/compute_ik",
+    "validity_service": "/left_ik/check_state_validity",
+    "avoid_collisions": true,
+    "ik_timeout_s": 1.0,
+    "maximum_joint_step_rad": 0.22,
+    "path_samples_per_segment": 40
+  },
+  "hand_eye": {
+    "source": "/home/aup/tmr-mobile-manipulation/grasp/config/left_hand_eye_calibrated.yaml",
+    "parent_semantics": "measured_left_end_effector",
+    "transform_parent_from_color_camera_row_major": [
+      [0.0065482077, -0.9421872556, -0.3350228296, 0.0621444405],
+      [0.9997136136, -0.0015436295, 0.0238811202, -0.0100142046],
+      [-0.0230176383, -0.3350832622, 0.9419073180, -0.1025307103],
+      [0.0, 0.0, 0.0, 1.0]
+    ]
+  },
+  "grasp": {
+    "link8_to_finger_contact_local_m": [0.0, 0.0, 0.155],
+    "contact_clearance_base_z_m": 0.008,
+    "pregrasp_clearance_base_z_m": 0.08,
+    "lift_clearance_base_z_m": 0.1,
+    "workspace_contact_min_m": [0.45, -0.55, 0.04],
+    "workspace_contact_max_m": [1.15, 0.55, 0.55]
+  },
+  "initial_joints_rad": [-1.71976900100708, -1.6329213380813599, 1.8240526914596558, -2.447446823120117, 2.177191972732544, 0.8496646285057068, -3.05077862739563],
+  "initial_joint_tolerance_rad": 0.025
+}

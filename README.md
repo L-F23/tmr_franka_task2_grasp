@@ -73,3 +73,15 @@ http://172.16.0.50:18082/tmr_zed_latest.jpg
 ```
 
 底盘运动通过 SSH 在 `tmr-user@172.16.0.50` 本机执行，固定使用与底盘控制器一致的 ROS Domain 0；机械臂不接收运动命令。
+
+## 导热垫末端抓取 FK/IK
+
+按固定顺序执行“左臂初始位复位 → 底盘视觉居中 → 连续静止确认 → D405 原始深度配准 → 手眼坐标变换 → FK/IK → MoveIt 碰撞检查”：
+
+```bash
+cd /home/aup/tmr_franka_task2_grasp && source /home/aup/tmr_env.sh && /usr/bin/python3 run_thermal_pad_pipeline.py --execute
+```
+
+双雷达确实离线且现场明确允许仅依赖里程计时，必须额外显式添加 `--allow-odom-only`。流程的最后阶段仅解算和校验，不闭合夹爪、不执行抓取轨迹；结果写入 `config/latest_thermal_pad_ik.json`，标注图写入 `outputs/thermal_pad_ik.jpg`。
+
+`thermal_pad_ik.py` 会同时要求：导热垫中心落在左腕图像 Y 方向 ±35 px、底盘速度连续 1 秒低于阈值、左臂处于记录的初始关节位、RGB/深度时间差不超过 0.1 秒、深度有效、手眼标定与 FK 一致、所有 IK 点连续且无碰撞。任一条件不满足即以零动作退出。靠近机器人且向下搭的一端按当前初始姿态标定为导热垫长轴的图像 `+X` 端，参数集中在 `config/thermal_pad_pick.json`。

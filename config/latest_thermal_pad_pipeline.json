@@ -1,0 +1,10 @@
+{
+  "started_at_unix": 1788408245.879252,
+  "execute_authorized": true,
+  "ordered_stages": [],
+  "right_arm_commanded": false,
+  "gripper_commanded": false,
+  "status": "blocked",
+  "error": "restore_left_initial failed with exit code 1",
+  "completed_at_unix": 1788408252.472264
+}
