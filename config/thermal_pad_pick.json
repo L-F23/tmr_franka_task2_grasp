@@ -68,6 +68,8 @@
     "ground_aligned_frame": "base",
     "shoulder_frame": "left_fr3v2_link0",
     "ground_forward_axis_xyz": [1.0, 0.0, 0.0],
+    "segment_boundary_after_step": 6,
+    "segment_1_terminal_target": "carry_far_12cm",
     "open_advance_m": 0.06,
     "staging_clearance_z_m": 0.08,
     "lift_vertical_m": 0.22,

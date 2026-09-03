@@ -104,6 +104,10 @@ def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
         raise SequenceDesignError(
             "ground-aligned reference frame must be explicit and distinct from the arm shoulder frame"
         )
+    if int(config.get("segment_boundary_after_step", -1)) != 6:
+        raise SequenceDesignError("the configured segment boundary must remain after step 6")
+    if config.get("segment_1_terminal_target") != "carry_far_12cm":
+        raise SequenceDesignError("segment 1 must terminate at carry_far_12cm")
     forward = _unit(config["ground_forward_axis_xyz"], "ground-frame forward axis")
     up = np.array([0.0, 0.0, 1.0])
     if abs(float(np.dot(forward, up))) > 1e-6:
@@ -138,29 +142,40 @@ def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
         orientation, forward, float(config["release_forward_tilt_deg"])
     )
 
-    def pose(name, position, quaternion=orientation, semantics=""):
+    def pose(name, position, segment, step, quaternion=orientation, semantics=""):
         return {
             "name": name,
+            "segment": int(segment),
+            "step": int(step),
             "position_m": np.asarray(position, dtype=float).tolist(),
             "orientation_xyzw": normalize_quaternion(quaternion).tolist(),
             "semantics": semantics,
         }
 
     targets = [
-        pose("staging_above_pick", staging, semantics="wrist flange horizontal; gripper vertical"),
-        pose("pick_height_retracted", pick_level, semantics="same Z as the previously detected grasp endpoint"),
-        pose("advance_open_to_pad", grasp, semantics="advance along base +X while gripper remains open"),
-        pose("lift_vertical_22cm", lifted),
-        pose("carry_far_12cm", carried_far),
-        pose("lower_vertical_2cm", lowered_2cm),
-        pose("lower_and_retract", diagonal, semantics="simultaneous base -Z and -X translation"),
+        pose("staging_above_pick", staging, 1, 1,
+             semantics="wrist flange horizontal; gripper vertical"),
+        pose("pick_height_retracted", pick_level, 1, 2,
+             semantics="same ground-frame Z as the previously detected grasp endpoint"),
+        pose("advance_open_to_pad", grasp, 1, 3,
+             semantics="advance along ground-frame +X while gripper remains open"),
+        pose("lift_vertical_22cm", lifted, 1, 5),
+        pose("carry_far_12cm", carried_far, 1, 6,
+             semantics="segment 1 ends here and holds this pose"),
+        pose("lower_vertical_2cm", lowered_2cm, 2, 7),
+        pose("lower_and_retract", diagonal, 2, 8,
+             semantics="simultaneous ground-frame -Z and -X translation"),
         pose(
             "tilt_forward_and_retract_release",
             release,
+            2,
+            10,
             release_orientation,
-            semantics="simultaneous forward tool tilt and base -X retraction",
+            semantics="simultaneous forward tool tilt and ground-frame -X retraction",
         ),
     ]
+    segment_1_names = [target["name"] for target in targets if target["segment"] == 1]
+    segment_2_names = [target["name"] for target in targets if target["segment"] == 2]
     return {
         "reference_frame": reference_frame,
         "shoulder_frame_forbidden_for_offsets": shoulder_frame,
@@ -176,11 +191,30 @@ def build_sequence(grasp_position, vertical_orientation, config: dict) -> dict:
             "post-lift object-held verification is not yet implemented",
         ],
         "targets": targets,
+        "segments": [
+            {
+                "id": 1,
+                "name": "pick_lift_and_far_transfer",
+                "steps": [1, 2, 3, 4, 5, 6],
+                "target_names": segment_1_names,
+                "terminal_target": "carry_far_12cm",
+                "terminal_behavior": "hold_pose_and_wait_for_explicit_segment_2_authorization",
+            },
+            {
+                "id": 2,
+                "name": "lower_place_and_release",
+                "steps": [7, 8, 9, 10],
+                "target_names": segment_2_names,
+                "start_gate": "segment_1_terminal_pose_and_object_hold_reconfirmed",
+            },
+        ],
         "events": [
-            {"after_target": "pick_height_retracted", "command": "open_gripper"},
-            {"after_target": "advance_open_to_pad", "command": "close_gripper"},
-            {"after_target": "lift_vertical_22cm", "command": "verify_object_held"},
-            {"after_target": "lower_and_retract", "command": "open_gripper"},
-            {"after_target": "tilt_forward_and_retract_release", "command": "verify_release"},
+            {"step": 3, "after_target": "pick_height_retracted", "command": "open_gripper"},
+            {"step": 4, "after_target": "advance_open_to_pad", "command": "close_gripper"},
+            {"step": 5, "after_target": "lift_vertical_22cm", "command": "verify_object_held"},
+            {"step": 6, "after_target": "carry_far_12cm", "command": "hold_and_end_segment_1"},
+            {"step": 7, "before_target": "lower_vertical_2cm", "command": "authorize_segment_2"},
+            {"step": 9, "after_target": "lower_and_retract", "command": "open_gripper"},
+            {"step": 10, "after_target": "tilt_forward_and_retract_release", "command": "verify_release"},
         ],
     }

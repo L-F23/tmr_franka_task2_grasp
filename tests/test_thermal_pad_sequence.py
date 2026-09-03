@@ -14,6 +14,8 @@ CONFIG = {
     "ground_aligned_frame": "base",
     "shoulder_frame": "left_fr3v2_link0",
     "ground_forward_axis_xyz": [1.0, 0.0, 0.0],
+    "segment_boundary_after_step": 6,
+    "segment_1_terminal_target": "carry_far_12cm",
     "open_advance_m": 0.06,
     "staging_clearance_z_m": 0.08,
     "lift_vertical_m": 0.22,
@@ -71,8 +73,22 @@ def test_unvalidated_release_parameters_block_execution() -> None:
     assert not sequence["execution_ready"]
     assert sequence["execution_blockers"]
     assert [event["command"] for event in sequence["events"]] == [
-        "open_gripper", "close_gripper", "verify_object_held", "open_gripper", "verify_release"
+        "open_gripper", "close_gripper", "verify_object_held",
+        "hold_and_end_segment_1", "authorize_segment_2",
+        "open_gripper", "verify_release",
     ]
+
+
+def test_sequence_is_split_after_step_six() -> None:
+    sequence = build_sequence([1.0, 0.0, 0.75], [1.0, 0.0, 0.0, 0.0], CONFIG)
+    first, second = sequence["segments"]
+    assert first["steps"] == [1, 2, 3, 4, 5, 6]
+    assert first["terminal_target"] == "carry_far_12cm"
+    assert first["terminal_behavior"].startswith("hold_pose")
+    assert second["steps"] == [7, 8, 9, 10]
+    assert second["target_names"][0] == "lower_vertical_2cm"
+    assert all(target["segment"] == 1 for target in sequence["targets"][:5])
+    assert all(target["segment"] == 2 for target in sequence["targets"][5:])
 
 
 def test_non_vertical_gripper_is_rejected() -> None:
