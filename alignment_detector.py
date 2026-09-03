@@ -26,6 +26,8 @@ def detect_target(image: np.ndarray) -> Target | None:
     for contour in contours:
         area = cv2.contourArea(contour)
         x, y, w, h = cv2.boundingRect(contour)
+        if x <= 3 or y + h >= int(0.82 * height):
+            continue
         if area < 0.008 * width * height or w < 45 or h < 35:
             continue
         rectangularity = area / max(1.0, w * h)
@@ -58,6 +60,17 @@ def horizontal_decision(target: Target | None, width: int, deadband_px: int = 45
     if abs(error) <= deadband_px:
         return "centered"
     return "move_right" if error > 0 else "move_left"
+
+
+def wrist_vertical_robot_decision(target: Target | None, height: int,
+                                  deadband_px: int = 35) -> str:
+    """Initial-pose calibration: image up/down maps to robot left/right."""
+    if target is None:
+        return "not_visible"
+    error = target.center[1] - height / 2
+    if abs(error) <= deadband_px:
+        return "centered"
+    return "move_left" if error < 0 else "move_right"
 
 
 def detect_main_hint(image: np.ndarray) -> Target | None:

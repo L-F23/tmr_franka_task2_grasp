@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-09-03T11:24:35+08:00",
+  "recorded_at": "2026-09-03T11:32:10+08:00",
   "camera_health": {
     "main": true,
     "left_wrist": true
@@ -12,15 +12,18 @@
   },
   "left_wrist_camera": {
     "target_visible": true,
-    "target_center_px": [596.5412, 188.3112],
+    "target_center_px": [618.6489, 111.3156],
     "image_size_px": [640, 480],
-    "confidence": 0.8806,
-    "decision": "move_right"
+    "confidence": 0.8957,
+    "controlled_image_axis": "y",
+    "calibration": "image_up/down maps to robot_left/right",
+    "decision": "move_left"
   },
   "execution": {
     "requested": true,
     "motion_commanded": false,
-    "result": "blocked_by_dual_radar_safety_gate",
-    "missing_topics": ["/lidar_front/scan", "/lidar_rear/scan"]
+    "result": "left_arm_incremental_ptp_rejected",
+    "ptp_status": 3,
+    "motion_completed": false
   }
 }

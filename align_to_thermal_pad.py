@@ -9,7 +9,12 @@ import subprocess
 import time
 import cv2
 
-from alignment_detector import detect_main_hint, detect_target, horizontal_decision
+from alignment_detector import (
+    detect_main_hint,
+    detect_target,
+    horizontal_decision,
+    wrist_vertical_robot_decision,
+)
 
 VIEWER = "http://127.0.0.1:18081"
 MOVE_SCRIPT = "/home/aup/tmr-mobile-manipulation/base/scripts/12_translate_right_odom_only.py"
@@ -50,7 +55,11 @@ def observe() -> dict:
     main_target = detect_target(main) or detect_main_hint(main)
     selected = wrist_target if wrist_target else main_target
     source = "wrist" if wrist_target else "main"
-    decision = horizontal_decision(selected, wrist.shape[1] if wrist_target else main.shape[1])
+    decision = (
+        wrist_vertical_robot_decision(wrist_target, wrist.shape[0])
+        if wrist_target
+        else horizontal_decision(main_target, main.shape[1])
+    )
     return {
         "source": source,
         "decision": decision,
@@ -58,7 +67,8 @@ def observe() -> dict:
         "main_visible": main_target is not None,
         "center": None if selected is None else list(selected.center),
         "confidence": None if selected is None else selected.confidence,
-        "width": wrist.shape[1] if wrist_target else main.shape[1],
+        "controlled_image_axis": "y" if wrist_target else "x",
+        "image_size": list((wrist if wrist_target else main).shape[1::-1]),
     }
 
 

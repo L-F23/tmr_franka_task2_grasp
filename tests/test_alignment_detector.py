@@ -1,7 +1,12 @@
 import cv2
 import numpy as np
 
-from alignment_detector import detect_main_hint, detect_target, horizontal_decision
+from alignment_detector import (
+    detect_main_hint,
+    detect_target,
+    horizontal_decision,
+    wrist_vertical_robot_decision,
+)
 
 
 def test_detects_grey_pad_on_black_base_and_requests_right():
@@ -27,3 +32,17 @@ def test_main_hint_tolerates_occluded_black_base():
     hint = detect_main_hint(image)
     assert hint is not None
     assert abs(hint.center[0] - 606.5) < 5
+
+
+def test_rejects_dark_gripper_shape_touching_bottom_edge():
+    image = np.full((480, 640, 3), 230, np.uint8)
+    cv2.rectangle(image, (0, 300), (180, 479), (15, 15, 15), -1)
+    cv2.rectangle(image, (60, 350), (150, 390), (120, 120, 120), -1)
+    assert detect_target(image) is None
+
+
+def test_wrist_vertical_axis_maps_up_to_robot_left():
+    target = type("T", (), {"center": (500.0, 120.0)})()
+    assert wrist_vertical_robot_decision(target, 480) == "move_left"
+    target = type("T", (), {"center": (500.0, 360.0)})()
+    assert wrist_vertical_robot_decision(target, 480) == "move_right"
