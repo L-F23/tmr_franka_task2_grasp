@@ -1,6 +1,11 @@
 import numpy as np
 
-from stage5_release_diagonal import clearance_compensated_position, OrderedRelease, release_target
+from stage5_release_diagonal import (
+    OrderedRelease,
+    clearance_compensated_position,
+    front_loaded_descent_fraction,
+    release_target,
+)
 
 
 def test_release_target_moves_backward_and_down_together():
@@ -14,6 +19,16 @@ def test_initial_and_rotating_descent_total_70mm():
     target = release_target(lowered, 0.11, 0.062)
     assert np.allclose(lowered, [1.0, 0.1, 0.792])
     assert np.allclose(target, [0.89, 0.1, 0.73])
+
+
+def test_descent_is_front_loaded_but_preserves_total_distance():
+    fractions = [front_loaded_descent_fraction(value / 10.0) for value in range(11)]
+    increments = np.diff(fractions)
+    assert fractions[0] == 0.0
+    assert fractions[-1] == 1.0
+    assert np.all(increments > 0.0)
+    assert increments[0] > increments[-1]
+    assert np.all(np.diff(increments) < 1e-12)
 
 
 def test_gripper_begins_at_6cm_and_arm_keeps_retracting():

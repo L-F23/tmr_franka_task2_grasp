@@ -26,6 +26,14 @@ def release_target(position, backward_m: float, down_m: float) -> np.ndarray:
     )
 
 
+def front_loaded_descent_fraction(fraction: float, power: float = 2.0) -> float:
+    """Ease-out descent: larger vertical increments first, smaller ones later."""
+    value = float(np.clip(fraction, 0.0, 1.0))
+    if power < 1.0:
+        raise ValueError("descent profile power must be at least 1")
+    return 1.0 - (1.0 - value) ** float(power)
+
+
 def clearance_compensated_position(
     raw_link8_position, orientation, contact_local, minimum_contact_z: float,
 ) -> tuple[np.ndarray, float]:
@@ -112,6 +120,7 @@ def main() -> int:
     parser.add_argument("--pre-open-contact-drop-m", type=float, default=0.015)
     parser.add_argument("--maximum-contact-drop-m", type=float, default=0.07)
     parser.add_argument("--speed-rad-s", type=float, default=0.05)
+    parser.add_argument("--descent-ease-power", type=float, default=2.0)
     args = parser.parse_args()
     if not args.execute:
         parser.error("--execute is required for physical motion")
@@ -131,6 +140,8 @@ def main() -> int:
         parser.error("--maximum-contact-drop-m must be between pre-open drop and 0.08")
     if args.initial_down_m + args.down_m > args.maximum_contact_drop_m + 1e-9:
         parser.error("initial-down-m + down-m cannot exceed maximum-contact-drop-m")
+    if not 1.0 < args.descent_ease_power <= 4.0:
+        parser.error("--descent-ease-power must be in (1, 4]")
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
     rclpy.init()
@@ -142,6 +153,8 @@ def main() -> int:
         "requested_backward_m": args.backward_m,
         "requested_initial_down_m": args.initial_down_m,
         "requested_down_m": args.down_m,
+        "descent_profile": "front_loaded_ease_out",
+        "descent_ease_power": args.descent_ease_power,
         "gripper_motion": "begin_opening_near_6cm; continue_retracting_while_opening",
         "open_after_retreat_m": args.open_after_m,
         "tilt_begins_at_retreat_fraction": 0.0,
@@ -186,12 +199,18 @@ def main() -> int:
         previous_orientation = np.asarray(orientation, dtype=float)
         clearance_compensations = []
         allowed_contact_drops = []
+        descent_fractions = []
         open_fraction = args.open_after_m / args.backward_m
         # Ten milestones make translation and the 90-degree dump simultaneous.
         for index, fraction in enumerate(np.linspace(0.1, 1.0, 10), 1):
-            raw_position = np.asarray(lowered_start) + fraction * (
-                np.asarray(raw_target) - np.asarray(lowered_start)
+            descent_fraction = front_loaded_descent_fraction(
+                float(fraction), args.descent_ease_power
             )
+            raw_position = np.asarray(lowered_start, dtype=float) + np.array([
+                -args.backward_m * float(fraction),
+                0.0,
+                -args.down_m * descent_fraction,
+            ])
             milestone_orientation = slerp(orientation, tilted_orientation, float(fraction))
             if fraction <= open_fraction:
                 allowed_drop = args.initial_down_m + (
@@ -213,6 +232,7 @@ def main() -> int:
             plan.extend(segment)
             clearance_compensations.append(float(compensation))
             allowed_contact_drops.append(float(allowed_drop))
+            descent_fractions.append(float(descent_fraction))
             previous_position = milestone_position
             previous_orientation = milestone_orientation
         report["before"] = {
@@ -226,6 +246,7 @@ def main() -> int:
         report["target_link8_base_orientation_xyzw"] = tilted_orientation
         report["final_minimum_finger_contact_base_z_m"] = minimum_contact_z
         report["allowed_contact_drop_by_milestone_m"] = allowed_contact_drops
+        report["descent_fraction_by_milestone"] = descent_fractions
         report["clearance_compensation_by_milestone_m"] = clearance_compensations
         report["planned_waypoint_count"] = len(plan)
         opened = float(config["empty_cycle"]["open_position"])

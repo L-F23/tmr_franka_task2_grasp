@@ -150,4 +150,4 @@ cd /home/aup/tmr_franka_task2_grasp && source /home/aup/tmr_env.sh && /usr/bin/p
 
 task3 仓库只作为行为模板和底层冷启动服务来源，不由本项目写入。借鉴的契约包括：任务级互斥锁、ROS Domain 隔离、运动阶段原子检查点、严格动作结果验证和异常后的零速退出。
 
-最终释放使用 `stage5_release_diagonal.py`：先下降 `0.008 m`，随后在后退 `0.11 m` 的同时继续缓慢下降，使累计下降不超过 `0.07 m`，并从后退开始逐渐把末端朝地面倾转至 `90°`；后退达到 `0.06 m` 时开始张开夹爪，机械臂继续完成剩余后退，随后上抬脱离并回到初始位。流程记录写入 `config/latest_full_thermal_pad_cycle.json`。不带 `--execute` 时只输出阶段计划，不发送任何运动命令。
+最终释放使用 `stage5_release_diagonal.py`：先下降 `0.008 m`，随后在后退 `0.11 m` 的同时按 ease-out 曲线继续下降——前段下降幅度较大，后段逐步减小，总累计下降仍不超过 `0.07 m`；并从后退开始逐渐把末端朝地面倾转至 `90°`。后退达到 `0.06 m` 时开始张开夹爪，机械臂继续完成剩余后退，随后上抬脱离并回到初始位。默认下降曲线幂次为 `2.0`，可用 `--descent-ease-power` 在 `(1, 4]` 内调整。流程记录写入 `config/latest_full_thermal_pad_cycle.json`。不带 `--execute` 时只输出阶段计划，不发送任何运动命令。
