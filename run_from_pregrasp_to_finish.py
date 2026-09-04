@@ -161,19 +161,30 @@ def run_stage(label: str, command: list[str], timeout_s: float) -> dict:
     }
 
 
-def execute(record_path: Path) -> int:
+def execute(
+    record_path: Path,
+    *,
+    stages: tuple[tuple[str, list[str], float], ...] | None = None,
+    entry_condition: str = (
+        "left arm already at calibrated pregrasp pose and base at black-base reference"
+    ),
+    excluded_stages: list[str] | None = None,
+) -> int:
+    selected_stages = stage_commands() if stages is None else stages
+    selected_exclusions = [
+        "robot_service_startup",
+        "initial_2m_base_transport",
+        "black_base_coarse_search",
+        "table_edge_fore_aft_alignment",
+        "move_left_arm_into_pregrasp",
+    ] if excluded_stages is None else excluded_stages
     record = {
         "schema_version": 1,
         "status": "running",
         "started_at_unix_s": time.time(),
-        "entry_condition": "left arm already at calibrated pregrasp pose and base at black-base reference",
-        "excluded_stages": [
-            "robot_service_startup",
-            "initial_2m_base_transport",
-            "black_base_coarse_search",
-            "table_edge_fore_aft_alignment",
-            "move_left_arm_into_pregrasp",
-        ],
+        "entry_condition": entry_condition,
+        "excluded_stages": selected_exclusions,
+        "ordered_stages": [label for label, _command, _timeout in selected_stages],
         "physical_motion_authorized": True,
         "completed_stages": [],
         "stage_results": [],
@@ -183,7 +194,7 @@ def execute(record_path: Path) -> int:
     write_record(record_path, record)
     code = 2
     try:
-        for label, command, timeout_s in stage_commands():
+        for label, command, timeout_s in selected_stages:
             record["active_stage"] = label
             write_record(record_path, record)
             result = run_stage(label, command, timeout_s)
