@@ -238,11 +238,13 @@ def main() -> int:
     mode.add_argument("--check-only", action="store_true", help="read-only health check")
     mode.add_argument("--execute", action="store_true", help="prepare, then execute the full cycle")
     parser.add_argument("--initial-right-m", type=float, default=2.0)
+    parser.add_argument("--parent-lock-held", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     lock = None
     try:
-        lock = acquire_motion_lock()
+        if not args.parent_lock_held:
+            lock = acquire_motion_lock()
         try:
             record = check_only() if args.check_only else prepare()
             print(json.dumps(record, indent=2), flush=True)

@@ -2,6 +2,8 @@ import cv2
 
 from pregrasp_lateral_alignment import (
     main_guidance,
+    mapped_correction_m,
+    mapped_wrist_state,
     wrist_decision,
 )
 from alignment_detector import detect_occluded_grey_pad, detect_target
@@ -31,3 +33,36 @@ def test_main_reference_guides_from_red_pad_displacement():
     # red pad is to the right, so the base must move right.
     result = main_guidance(image, 700.0, 20.0)
     assert result["decision"] == "move_right"
+
+
+def test_measured_mapping_has_verified_wrist_y_direction():
+    import json
+
+    mapping = json.load(open("config/wrist_lateral_mapping.json"))
+    assert mapped_correction_m(-20.0, mapping) > 0.0
+    assert mapped_correction_m(20.0, mapping) < 0.0
+
+
+def test_measured_mapping_reference_is_aligned():
+    import json
+
+    mapping = json.load(open("config/wrist_lateral_mapping.json"))
+    image = cv2.imread(mapping["reference_image"])
+    result = mapped_wrist_state(image, mapping, 6.0)
+    assert result["decision"] == "aligned"
+    assert result["target_center_y_error_px"] == 0.0
+
+
+def test_visible_target_outside_calibrated_range_keeps_wrist_direction():
+    import json
+    import numpy as np
+
+    mapping = json.load(open("config/wrist_lateral_mapping.json"))
+    reference = cv2.imread(mapping["reference_image"])
+    shifted = np.full_like(reference, 190)
+    x, y, width, height = mapping["reference_bbox_xywh"]
+    shifted[y + 80:y + 80 + height, x:x + width] = reference[y:y + height, x:x + width]
+    result = mapped_wrist_state(shifted, mapping, 6.0)
+    assert result["inside_calibrated_range"] is False
+    assert result["decision"] == "move_left"
+    assert result["mapping_use"] == "operator_verified_direction_with_step_clamp"

@@ -35,33 +35,61 @@ def main() -> int:
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
     parser.add_argument("--alignment-record", type=Path, default=DEFAULT_ALIGNMENT_RECORD)
     parser.add_argument("--maximum-reference-error-rad", type=float, default=0.012)
+    parser.add_argument(
+        "--skip-pregrasp-calibration-gates",
+        action="store_true",
+        help="temporarily bypass visual-alignment freshness and grasp-pose recheck",
+    )
     args = parser.parse_args()
     if not args.execute:
         parser.error("--execute is required for physical gripper motion")
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
-    reference = json.loads(args.reference.read_text(encoding="utf-8"))
-    alignment = json.loads(args.alignment_record.read_text(encoding="utf-8"))
-    alignment_age_s = time.time() - float(alignment.get("aligned_at_unix_s", 0.0))
-    maximum_alignment_age_s = float(json.loads(
-        (ROOT / "config" / "pregrasp_lateral_alignment.json").read_text(encoding="utf-8")
-    )["maximum_alignment_record_age_s"])
-    if alignment.get("status") != "pregrasp_lateral_alignment_confirmed":
-        raise RuntimeError("mandatory pregrasp lateral alignment is not confirmed")
-    if not 0.0 <= alignment_age_s <= maximum_alignment_age_s:
-        raise RuntimeError(
-            f"mandatory pregrasp alignment record is stale: {alignment_age_s:.3f}s"
-        )
-    expected = np.asarray(reference_joints(reference), dtype=float)
     report = {
         "status": "starting",
-        "reference": str(args.reference),
-        "alignment_record": str(args.alignment_record),
-        "alignment_age_s": alignment_age_s,
+        "pregrasp_calibration_gates_enabled": (
+            not args.skip_pregrasp_calibration_gates
+        ),
         "base_commanded": False,
         "right_arm_commanded": False,
         "spine_commanded": False,
     }
+    expected = None
+    if args.skip_pregrasp_calibration_gates:
+        report["pregrasp_calibration_gate_status"] = "temporarily_bypassed"
+    else:
+        reference = json.loads(args.reference.read_text(encoding="utf-8"))
+        alignment = json.loads(args.alignment_record.read_text(encoding="utf-8"))
+        aligned_at_unix_s = float(alignment.get("aligned_at_unix_s", 0.0))
+        alignment_age_s = time.time() - aligned_at_unix_s
+        # Validate that alignment was fresh when the guarded approach began.
+        # The approach/contact/retreat itself can legitimately take longer than
+        # the freshness window and does not move the base.
+        approach_started_at_unix_s = float(
+            reference.get("before", {}).get("recorded_unix_s", time.time())
+        )
+        alignment_age_at_approach_start_s = (
+            approach_started_at_unix_s - aligned_at_unix_s
+        )
+        maximum_alignment_age_s = float(json.loads(
+            (ROOT / "config" / "pregrasp_lateral_alignment.json").read_text(encoding="utf-8")
+        )["maximum_alignment_record_age_s"])
+        if alignment.get("status") != "pregrasp_lateral_alignment_confirmed":
+            raise RuntimeError("mandatory pregrasp lateral alignment is not confirmed")
+        if not 0.0 <= alignment_age_at_approach_start_s <= maximum_alignment_age_s:
+            raise RuntimeError(
+                "mandatory pregrasp alignment was stale when approach started: "
+                f"{alignment_age_at_approach_start_s:.3f}s"
+            )
+        if reference.get("base_commanded") is not False:
+            raise RuntimeError("stage-one approach record does not confirm a stationary base")
+        expected = np.asarray(reference_joints(reference), dtype=float)
+        report.update(
+            reference=str(args.reference),
+            alignment_record=str(args.alignment_record),
+            alignment_age_s=alignment_age_s,
+            alignment_age_at_approach_start_s=alignment_age_at_approach_start_s,
+        )
     rclpy.init()
     node = ThermalPadExecutor(config)
     node.isolated_base_zero_locked = True
@@ -71,18 +99,19 @@ def main() -> int:
             raise RuntimeError("left gripper action unavailable")
         wait_motion_inputs(node)
         node.motion_gate()
-        measured = np.asarray(node.joints, dtype=float)
-        reference_error = float(np.max(np.abs(measured - expected)))
-        report.update(
-            measured_joint_positions_rad=measured.tolist(),
-            expected_joint_positions_rad=expected.tolist(),
-            maximum_reference_error_rad=reference_error,
-        )
-        if reference_error > args.maximum_reference_error_rad:
-            raise RuntimeError(
-                f"left arm moved away from recorded grasp pose: "
-                f"{reference_error:.6f} rad"
+        if expected is not None:
+            measured = np.asarray(node.joints, dtype=float)
+            reference_error = float(np.max(np.abs(measured - expected)))
+            report.update(
+                measured_joint_positions_rad=measured.tolist(),
+                expected_joint_positions_rad=expected.tolist(),
+                maximum_reference_error_rad=reference_error,
             )
+            if reference_error > args.maximum_reference_error_rad:
+                raise RuntimeError(
+                    f"left arm moved away from recorded grasp pose: "
+                    f"{reference_error:.6f} rad"
+                )
         result = node.command_gripper(
             float(config["empty_cycle"]["closed_position"]),
             "close_at_recorded_thermal_pad_pose",

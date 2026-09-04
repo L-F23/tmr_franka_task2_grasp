@@ -96,6 +96,7 @@
   "initial_joint_tolerance_rad": 0.025,
   "pregrasp_start": {
     "semantics": "left arm is already at the calibrated retracted grasp-preparation pose; base is at the black-base reference",
+    "allow_task_space_equivalent_redundant_solution": true,
     "expected_joint_positions_rad": [
       0.22886455749365048,
       1.4870408072238115,

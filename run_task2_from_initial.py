@@ -3,9 +3,10 @@
 
 The robot services must already be running.  This entry does not perform the
 initial 2 m base transport, black-base search, or table-edge alignment.  It
-first restores the left arm to the recorded Task 2 initial joints, immediately
-moves it to the calibrated pregrasp pose, verifies that pose, and only then
-continues with the verified grasp and transfer sequence.
+first restores Spine to the canonical 0.6 m height and the left arm to the
+recorded Task 2 initial joints, immediately moves it to the calibrated pregrasp
+pose, verifies that pose, and only then continues with the verified grasp and
+transfer sequence.
 """
 
 from __future__ import annotations
@@ -31,17 +32,18 @@ DEFAULT_RECORD = ROOT / "config" / "latest_task2_from_initial.json"
 
 STAGE_ORDER = (
     "services_and_live_cameras_verified",
+    "spine_restored_0_6m",
     "left_initial_restored",
     "left_pregrasp_reached",
     "calibrated_pregrasp_pose_verified",
-    "grasp_pose_reached_2_5cm_forward",
     "pregrasp_lateral_alignment_confirmed",
+    "force_contact_then_retreat_18mm",
     "thermal_pad_grasped",
     "left_arm_lifted_12cm",
-    "red_pad_centered_under_left_wrist",
-    "placement_forward_12cm_down_12cm_complete",
-    "release_retract_tilt_and_open_complete",
-    "post_release_vertical_clearance_5cm",
+    "red_pad_station_reached_main_camera_wrist_advisory",
+    "placement_forward_143mm_down_12cm_complete",
+    "placement_retract_tilt_with_gripper_held",
+    "gripper_open_then_vertical_clearance_5cm",
     "left_initial_restored_after_transfer",
 )
 
@@ -53,16 +55,21 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
     return (
         (
             STAGE_ORDER[0],
-            python_command("quick_start.py", "--check-only"),
+            python_command("quick_start.py", "--parent-lock-held", "--check-only"),
             30.0,
         ),
         (
             STAGE_ORDER[1],
+            python_command("reset_spine_to_task_height.py", "--execute"),
+            620.0,
+        ),
+        (
+            STAGE_ORDER[2],
             python_command("restore_left_initial_direct.py"),
             150.0,
         ),
         (
-            STAGE_ORDER[2],
+            STAGE_ORDER[3],
             python_command(
                 "execute_thermal_pad_grasp.py",
                 "--execute", "--empty-cycle", "--fast",
@@ -71,9 +78,11 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
             ),
             180.0,
         ),
-        # Skip the pregrasp-only runner's health check, but retain its
-        # independent measured-joint/FK validation and every later stage.
-        *continuation[1:-1],
+        # Skip the pregrasp-only runner's health and Spine-reset stages, but
+        # retain its independent measured-joint/FK validation and every later
+        # stage. Spine was reset above while the arm was still at its safer
+        # initial pose.
+        *continuation[2:-1],
         (
             STAGE_ORDER[-1],
             python_command("restore_left_initial_direct.py"),
@@ -86,8 +95,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
+    parser.add_argument(
+        "--stop-after-pregrasp-alignment",
+        action="store_true",
+        help="stop with the left arm at the calibrated pregrasp pose before approach",
+    )
     args = parser.parse_args()
     stages = stage_commands()
+    if args.stop_after_pregrasp_alignment:
+        stop_index = next(
+            index for index, (label, _command, _timeout) in enumerate(stages)
+            if label == "pregrasp_lateral_alignment_confirmed"
+        )
+        stages = stages[:stop_index + 1]
     if not args.execute:
         print(json.dumps({
             "status": "dry_run",

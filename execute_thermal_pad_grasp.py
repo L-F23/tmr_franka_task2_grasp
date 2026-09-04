@@ -12,6 +12,7 @@ import numpy as np
 import rclpy
 from action_msgs.msg import GoalStatus
 from control_msgs.action import GripperCommand
+from controller_manager_msgs.srv import ListControllers, SwitchController
 from franka_msgs.action import PTPMotion
 from franka_spine_msgs.srv import GetPosition
 from rclpy.action import ActionClient
@@ -25,13 +26,146 @@ PTP_ACTION = "/left/action_server/ptp_motion"
 DEFAULT_RECORD = ROOT / "config" / "latest_thermal_pad_grasp.json"
 
 
+class GuardedContactStop(RuntimeError):
+    """Raised after cancelling an approach because external contact was detected."""
+
+
+def _vector3(value) -> np.ndarray:
+    return np.asarray([value.x, value.y, value.z], dtype=float)
+
+
+def _collision_indicator_values(indicators) -> list[float]:
+    values = []
+    for name in (
+        "is_cartesian_linear_contact",
+        "is_cartesian_angular_contact",
+        "is_cartesian_linear_collision",
+        "is_cartesian_angular_collision",
+    ):
+        values.extend(_vector3(getattr(indicators, name)).tolist())
+    values.extend(map(float, indicators.is_joint_contact))
+    values.extend(map(float, indicators.is_joint_collision))
+    return values
+
+
+class ExternalContactGuard:
+    """Debounced, baseline-relative Franka external-wrench guard.
+
+    The native contact/collision flags always win.  Wrench thresholds are
+    relative to a settled baseline so the tool/load gravity bias is not
+    mistaken for contact during the slow final approach.
+    """
+
+    def __init__(
+        self,
+        baseline_force_n,
+        baseline_torque_nm,
+        baseline_joint_torque_nm,
+        *,
+        approach_axis: int = 0,
+        axis_force_delta_n: float = 4.0,
+        force_delta_norm_n: float = 7.0,
+        torque_delta_norm_nm: float = 1.5,
+        joint_torque_delta_nm: float = 2.0,
+        consecutive_samples: int = 3,
+    ):
+        self.baseline_force_n = np.asarray(baseline_force_n, dtype=float)
+        self.baseline_torque_nm = np.asarray(baseline_torque_nm, dtype=float)
+        self.baseline_joint_torque_nm = np.asarray(
+            baseline_joint_torque_nm, dtype=float
+        )
+        self.approach_axis = int(approach_axis)
+        self.axis_force_delta_n = float(axis_force_delta_n)
+        self.force_delta_norm_n = float(force_delta_norm_n)
+        self.torque_delta_norm_nm = float(torque_delta_norm_nm)
+        self.joint_torque_delta_nm = float(joint_torque_delta_nm)
+        self.consecutive_samples = max(1, int(consecutive_samples))
+        self.trigger_count = 0
+        self.last_measurement = None
+
+    def observe(self, state) -> dict | None:
+        force = _vector3(state.o_f_ext_hat_k.wrench.force)
+        torque = _vector3(state.o_f_ext_hat_k.wrench.torque)
+        joint = np.asarray(state.tau_ext_hat_filtered.effort, dtype=float)
+        force_delta = force - self.baseline_force_n
+        torque_delta = torque - self.baseline_torque_nm
+        joint_delta = joint - self.baseline_joint_torque_nm
+        native_flag = any(
+            abs(value) > 0.0
+            for value in _collision_indicator_values(state.collision_indicators)
+        )
+        reasons = []
+        if native_flag:
+            reasons.append("franka_native_contact_or_collision_flag")
+        if abs(force_delta[self.approach_axis]) >= self.axis_force_delta_n:
+            reasons.append("approach_axis_force_delta")
+        if float(np.linalg.norm(force_delta)) >= self.force_delta_norm_n:
+            reasons.append("force_delta_norm")
+        if float(np.linalg.norm(torque_delta)) >= self.torque_delta_norm_nm:
+            reasons.append("torque_delta_norm")
+        if joint_delta.size and float(np.max(np.abs(joint_delta))) >= self.joint_torque_delta_nm:
+            reasons.append("joint_torque_delta")
+        # During a straight +X approach, orientation/load transients can move
+        # torque estimates without any object contact.  Torque and joint
+        # torque remain useful diagnostics, but may not stop the arm by
+        # themselves.  A stop requires either Franka's native indication or
+        # a sustained force change along the commanded approach axis.
+        trigger_eligible = native_flag or "approach_axis_force_delta" in reasons
+        self.trigger_count = self.trigger_count + 1 if trigger_eligible else 0
+        self.last_measurement = {
+            "force_base_n": force.tolist(),
+            "force_delta_n": force_delta.tolist(),
+            "torque_base_nm": torque.tolist(),
+            "torque_delta_nm": torque_delta.tolist(),
+            "maximum_joint_torque_delta_nm": (
+                float(np.max(np.abs(joint_delta))) if joint_delta.size else 0.0
+            ),
+            "native_contact_or_collision": native_flag,
+            "candidate_reasons": reasons,
+            "trigger_eligible": trigger_eligible,
+            "consecutive_trigger_samples": self.trigger_count,
+        }
+        if self.trigger_count >= self.consecutive_samples:
+            return dict(self.last_measurement)
+        return None
+
+
 class ThermalPadExecutor(ThermalPadPlanner):
     def __init__(self, config: dict):
         super().__init__(config)
         self.ptp_client = ActionClient(self, PTPMotion, PTP_ACTION)
         self.gripper_client = ActionClient(self, GripperCommand, GRIPPER_ACTION)
+        self.controller_list_client = self.create_client(
+            ListControllers, "/left/controller_manager/list_controllers"
+        )
+        self.controller_switch_client = self.create_client(
+            SwitchController, "/left/controller_manager/switch_controller"
+        )
         self.fast_execution = False
         self.isolated_base_zero_locked = False
+        self.contact_guard: ExternalContactGuard | None = None
+        self.contact_stop = None
+
+    def prepare_ptp_control(self) -> None:
+        """Release the impedance command interface before native PTP starts."""
+        if not self.controller_list_client.wait_for_service(timeout_sec=3.0):
+            raise RuntimeError("left controller-list service unavailable")
+        listed = self.call(
+            self.controller_list_client, ListControllers.Request(), timeout=5.0
+        )
+        states = {item.name: item.state for item in listed.controller}
+        if states.get("joint_impedance_controller") != "active":
+            return
+        if not self.controller_switch_client.wait_for_service(timeout_sec=3.0):
+            raise RuntimeError("left controller-switch service unavailable")
+        request = SwitchController.Request()
+        request.deactivate_controllers = ["joint_impedance_controller"]
+        request.strictness = SwitchController.Request.STRICT
+        request.activate_asap = False
+        request.timeout.sec = 5
+        response = self.call(self.controller_switch_client, request, timeout=8.0)
+        if not response.ok:
+            raise RuntimeError("failed to release left impedance controller for PTP")
 
     def base_stationary(self) -> bool:
         """Accept a separately verified zero lock on the isolated base host.
@@ -54,8 +188,88 @@ class ThermalPadExecutor(ThermalPadPlanner):
                 self.cancel(handle)
             reason = "Franka errors: " + ",".join(errors) if errors else "base moved during grasp"
             raise RuntimeError(reason)
+        if self.contact_guard is not None:
+            triggered = self.contact_guard.observe(self.robot_state)
+            if triggered is not None:
+                self.contact_stop = triggered
+                if handle is not None:
+                    self.cancel(handle)
+                raise GuardedContactStop(
+                    "guarded approach stopped on external contact: "
+                    + ",".join(triggered["candidate_reasons"])
+                )
+
+    def capture_external_wrench_baseline(
+        self, *, duration_s: float = 0.6, minimum_samples: int = 80, **guard_kwargs
+    ) -> dict:
+        """Capture a settled, read-only baseline and arm the contact guard."""
+        forces, torques, joints = [], [], []
+        deadline = time.monotonic() + float(duration_s)
+        while time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.01)
+            if self.robot_state is None:
+                continue
+            forces.append(_vector3(self.robot_state.o_f_ext_hat_k.wrench.force))
+            torques.append(_vector3(self.robot_state.o_f_ext_hat_k.wrench.torque))
+            joints.append(np.asarray(
+                self.robot_state.tau_ext_hat_filtered.effort, dtype=float
+            ))
+        if len(forces) < int(minimum_samples):
+            raise RuntimeError(
+                f"insufficient Franka wrench samples: {len(forces)} < {minimum_samples}"
+            )
+        force = np.median(np.asarray(forces), axis=0)
+        torque = np.median(np.asarray(torques), axis=0)
+        joint = np.median(np.asarray(joints), axis=0)
+        self.contact_stop = None
+        self.contact_guard = ExternalContactGuard(
+            force, torque, joint, **guard_kwargs
+        )
+        return {
+            "sample_count": len(forces),
+            "force_base_n": force.tolist(),
+            "torque_base_nm": torque.tolist(),
+            "joint_torque_nm": joint.tolist(),
+            "thresholds": {
+                "axis_force_delta_n": self.contact_guard.axis_force_delta_n,
+                "force_delta_norm_n": self.contact_guard.force_delta_norm_n,
+                "torque_delta_norm_nm": self.contact_guard.torque_delta_norm_nm,
+                "joint_torque_delta_nm": self.contact_guard.joint_torque_delta_nm,
+                "consecutive_samples": self.contact_guard.consecutive_samples,
+            },
+        }
+
+    def disable_contact_guard(self) -> None:
+        self.contact_guard = None
+
+    def wait_arm_stationary(
+        self, *, timeout_s: float = 4.0, maximum_velocity_rad_s: float = 0.01
+    ) -> dict:
+        """Wait for a cancelled native PTP goal to stop before retracting."""
+        deadline = time.monotonic() + float(timeout_s)
+        stable_samples = 0
+        maximum_seen = 0.0
+        while time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.01)
+            if self.robot_state is None:
+                continue
+            velocities = np.asarray(
+                self.robot_state.measured_joint_state.velocity, dtype=float
+            )
+            maximum = float(np.max(np.abs(velocities))) if velocities.size else 0.0
+            maximum_seen = max(maximum_seen, maximum)
+            stable_samples = stable_samples + 1 if maximum <= maximum_velocity_rad_s else 0
+            if stable_samples >= 20:
+                return {
+                    "maximum_velocity_limit_rad_s": float(maximum_velocity_rad_s),
+                    "stable_samples": stable_samples,
+                    "maximum_velocity_at_stop_rad_s": maximum,
+                    "maximum_velocity_seen_rad_s": maximum_seen,
+                }
+        raise RuntimeError("left arm did not settle after guarded-contact cancellation")
 
     def move_ptp(self, joints: list[float], label: str, speed: float) -> dict:
+        self.prepare_ptp_control()
         self.motion_gate()
         goal = PTPMotion.Goal()
         goal.goal_joint_configuration = list(map(float, joints))

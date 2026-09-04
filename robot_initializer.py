@@ -44,19 +44,32 @@ def run_ros(command: str, timeout: float = 90.0) -> str:
 
 def spine_request(endpoint: str, method: str = "GET", data: dict | None = None,
                   timeout: float = 10.0) -> Any:
-    request = Request(
-        f"{SPINE_API}/{endpoint}",
-        data=None if data is None else json.dumps(data).encode(),
-        method=method,
-        headers={"Content-Type": "application/json"},
+    # The deployed controller intermittently terminates Python/OpenSSL's TLS
+    # handshake but is stable with libcurl. Use argv-only curl requests (no
+    # shell interpolation) and retry transient transport failures.
+    command = [
+        "curl", "-ksS", "--fail-with-body",
+        "--connect-timeout", "3", "--max-time", str(float(timeout)),
+        "-X", method, "-H", "Content-Type: application/json",
+    ]
+    if data is not None:
+        command.extend(["--data", json.dumps(data)])
+    command.append(f"{SPINE_API}/{endpoint}")
+    last_error = "no response"
+    for attempt in range(1, 4):
+        completed = subprocess.run(
+            command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=timeout + 5.0, check=False,
+        )
+        if completed.returncode == 0:
+            payload = completed.stdout.strip()
+            return json.loads(payload) if payload else None
+        last_error = completed.stderr.strip() or completed.stdout.strip()
+        if attempt < 3:
+            time.sleep(0.4 * attempt)
+    raise InitializationError(
+        f"Spine {method} {endpoint} failed after 3 curl attempts: {last_error}"
     )
-    try:
-        with urlopen(request, timeout=timeout,
-                     context=ssl._create_unverified_context()) as response:
-            payload = response.read().decode()
-    except (HTTPError, URLError, TimeoutError) as exc:
-        raise InitializationError(f"Spine {method} {endpoint} failed: {exc}") from exc
-    return json.loads(payload) if payload else None
 
 
 def open_left_gripper(config: dict) -> dict:

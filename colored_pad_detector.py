@@ -115,7 +115,7 @@ def detect_colored_pads(
     ):
         if any(np.linalg.norm(
             np.asarray(candidate.center_px) - np.asarray(other.center_px)
-        ) < 40.0 for other in accepted):
+        ) < 50.0 for other in accepted):
             continue
         accepted.append(candidate)
     return sorted(accepted, key=lambda item: item.center_px[0])
@@ -154,6 +154,122 @@ def map_layout_to_distances(
         },
         "red_station_distance_cm": red_pair["distance_from_black_base_cm"],
     }
+
+
+def fit_center_distance_model(anchors: list[dict], degree: int = 2) -> dict:
+    """Fit distance along the observed 2-D board-center line.
+
+    Projection onto the principal board axis uses both image coordinates and
+    avoids assuming that the row is perfectly horizontal.  A quadratic is the
+    highest accepted degree for four anchors: a cubic would interpolate all
+    four samples exactly and hide measurement noise.
+    """
+    if len(anchors) < degree + 2:
+        raise ValueError("insufficient anchors for a non-overfit center model")
+    if degree not in (1, 2):
+        raise ValueError("center-distance polynomial degree must be 1 or 2")
+    centers = np.asarray([item["center_px"] for item in anchors], dtype=float)
+    distances = np.asarray(
+        [item["distance_from_black_base_cm"] for item in anchors], dtype=float
+    )
+    if centers.shape != (len(anchors), 2) or not np.all(np.isfinite(centers)):
+        raise ValueError("anchor centers must be finite 2-D coordinates")
+    if not np.all(np.diff(distances) > 0.0):
+        raise ValueError("anchor distances must be strictly increasing")
+    origin = np.mean(centers, axis=0)
+    centered = centers - origin
+    _u, _singular, vh = np.linalg.svd(centered, full_matrices=False)
+    axis = vh[0]
+    projections = centered @ axis
+    if np.corrcoef(projections, distances)[0, 1] < 0.0:
+        axis = -axis
+        projections = -projections
+    if not np.all(np.diff(projections) > 0.0):
+        raise ValueError("anchor centers are not monotonic along their principal axis")
+    coefficients = np.polyfit(projections, distances, degree)
+    predictions = np.polyval(coefficients, projections)
+    cross_track = centered - np.outer(projections, axis)
+    return {
+        "type": "principal_axis_polynomial",
+        "degree": degree,
+        "origin_px": origin.tolist(),
+        "axis_xy": axis.tolist(),
+        "coefficients_descending": coefficients.tolist(),
+        "projection_range_px": [float(projections[0]), float(projections[-1])],
+        "rmse_cm": float(np.sqrt(np.mean((predictions - distances) ** 2))),
+        "maximum_anchor_cross_track_px": float(
+            np.max(np.linalg.norm(cross_track, axis=1))
+        ),
+    }
+
+
+def predict_distance_from_center(
+    center_px, model: dict, *, maximum_cross_track_px: float,
+    maximum_extrapolation_px: float,
+) -> dict:
+    """Evaluate a fitted board-center model with geometric validity gates."""
+    center = np.asarray(center_px, dtype=float)
+    origin = np.asarray(model["origin_px"], dtype=float)
+    axis = np.asarray(model["axis_xy"], dtype=float)
+    delta = center - origin
+    projection = float(delta @ axis)
+    cross_track = float(np.linalg.norm(delta - projection * axis))
+    lower, upper = map(float, model["projection_range_px"])
+    if cross_track > float(maximum_cross_track_px):
+        raise ValueError(
+            f"red center is {cross_track:.2f}px away from calibrated board line"
+        )
+    if not (
+        lower - float(maximum_extrapolation_px)
+        <= projection
+        <= upper + float(maximum_extrapolation_px)
+    ):
+        raise ValueError("red center lies outside calibrated board-center range")
+    distance = float(np.polyval(model["coefficients_descending"], projection))
+    return {
+        "center_px": center.tolist(),
+        "axis_projection_px": projection,
+        "cross_track_error_px": cross_track,
+        "distance_from_black_base_cm": distance,
+    }
+
+
+def estimate_red_station_from_reference(
+    detections: list[ColoredPad], calibration: dict, image_size_px,
+) -> dict:
+    """Recognize the red center and infer station distance from saved anchors."""
+    red = [item for item in detections if item.color == "red"]
+    if len(red) != 1:
+        raise ValueError(f"expected exactly one red pad, detected {len(red)}")
+    reference_width, reference_height = map(
+        float, calibration["reference_image_size_px"]
+    )
+    image_width, image_height = map(float, image_size_px)
+    if min(image_width, image_height) <= 0.0:
+        raise ValueError("invalid current image size")
+    center_in_reference = [
+        red[0].center_px[0] * reference_width / image_width,
+        red[0].center_px[1] * reference_height / image_height,
+    ]
+    model_config = calibration["model"]
+    model = fit_center_distance_model(
+        calibration["anchors"], int(model_config["degree"])
+    )
+    estimate = predict_distance_from_center(
+        center_in_reference,
+        model,
+        maximum_cross_track_px=float(model_config["maximum_cross_track_px"]),
+        maximum_extrapolation_px=float(
+            model_config["maximum_extrapolation_px"]
+        ),
+    )
+    estimate.update({
+        "detected_red_center_px": list(red[0].center_px),
+        "detected_red_confidence": red[0].confidence,
+        "reference_scaled_center_px": center_in_reference,
+        "model": model,
+    })
+    return estimate
 
 
 def best_red_wrist_target(bgr: np.ndarray) -> ColoredPad | None:

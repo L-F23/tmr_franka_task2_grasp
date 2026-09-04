@@ -21,6 +21,7 @@ from thermal_pad_ik import DEFAULT_CONFIG, ROOT
 
 VIEWER = "http://127.0.0.1:18081"
 DEFAULT_ALIGNMENT_CONFIG = ROOT / "config" / "pregrasp_lateral_alignment.json"
+DEFAULT_WRIST_MAPPING = ROOT / "config" / "wrist_lateral_mapping.json"
 DEFAULT_RECORD = ROOT / "config" / "latest_pregrasp_lateral_alignment.json"
 
 
@@ -56,6 +57,51 @@ def wrist_decision(match_top_y: float, reference_top_y: float, deadband_px: floa
     # Operator-verified grasp-pose mapping: pad above gripper -> base right;
     # pad below gripper -> base left.
     return "move_right" if error < 0.0 else "move_left"
+
+
+def mapped_correction_m(center_y_error_px: float, mapping_config: dict) -> float:
+    coefficients = mapping_config["mapping"]["right_correction_m"]
+    error = float(center_y_error_px)
+    return (
+        float(coefficients["linear_m_per_px"]) * error
+        + float(coefficients["quadratic_m_per_px2"]) * error * error
+    )
+
+
+def mapped_wrist_state(
+    image: np.ndarray, mapping_config: dict, deadband_px: float
+) -> dict:
+    reference = cv2.imread(str(ROOT / mapping_config["reference_image"]))
+    if reference is None:
+        raise RuntimeError("calibrated wrist mapping reference image is unavailable")
+    x, y, width, height = map(int, mapping_config["reference_bbox_xywh"])
+    template = cv2.cvtColor(reference[y:y + height, x:x + width], cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    response = cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED)
+    _, confidence, _, location = cv2.minMaxLoc(response)
+    if confidence < float(mapping_config["minimum_template_confidence"]):
+        raise RuntimeError(f"wrist mapping confidence too low: {confidence:.3f}")
+    center_y = float(location[1] + height / 2.0)
+    error_y = center_y - float(mapping_config["reference_target_center_y_px"])
+    lower, upper = map(float, mapping_config["valid_center_y_error_px"])
+    inside_calibrated_range = lower <= error_y <= upper
+    correction = mapped_correction_m(error_y, mapping_config)
+    decision = "aligned" if abs(error_y) <= deadband_px else (
+        "move_right" if correction > 0.0 else "move_left"
+    )
+    return {
+        "source": "left_wrist_calibrated_mapping",
+        "decision": decision,
+        "target_center_y_px": center_y,
+        "target_center_y_error_px": error_y,
+        "recommended_right_correction_m": correction,
+        "template_confidence": float(confidence),
+        "inside_calibrated_range": inside_calibrated_range,
+        "mapping_use": (
+            "calibrated_magnitude_and_direction" if inside_calibrated_range
+            else "operator_verified_direction_with_step_clamp"
+        ),
+    }
 
 
 def main_guidance(image: np.ndarray, reference_red_x: float, deadband_px: float) -> dict:
@@ -99,6 +145,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--config", type=Path, default=DEFAULT_ALIGNMENT_CONFIG)
+    parser.add_argument("--wrist-mapping", type=Path, default=DEFAULT_WRIST_MAPPING)
     parser.add_argument("--robot-config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
     args = parser.parse_args()
@@ -106,11 +153,13 @@ def main() -> int:
         parser.error("--execute is required for physical alignment")
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
+    mapping_config = json.loads(args.wrist_mapping.read_text(encoding="utf-8"))
     robot_config = json.loads(args.robot_config.read_text(encoding="utf-8"))
     report = {
         "status": "blocked",
-        "semantics": "grasp-pose wrist-above=>base-right; wrist-below=>base-left; main fallback",
-        "wrist_gate": "structured black-base plus grey-pad detection; template matches cannot command motion",
+        "semantics": "calibrated wrist-Y-to-base-right correction; main fallback",
+        "wrist_gate": "operator-confirmed template and measured odometry mapping",
+        "wrist_mapping": str(args.wrist_mapping),
         "base_steps": [],
         "history": [],
         "right_arm_commanded": False,
@@ -122,31 +171,15 @@ def main() -> int:
         consecutive = 0
         for _ in range(int(config["maximum_steps"])):
             wrist = frame("left")
-            target = detect_target(wrist) or detect_occluded_grey_pad(wrist)
-            if target is not None:
-                target_center_y = float(target.center[1])
-                decision = wrist_decision(
-                    target_center_y,
-                    config["wrist_reference_center_y_px"],
-                    config["wrist_deadband_px"],
+            try:
+                state = mapped_wrist_state(
+                    wrist, mapping_config, config["wrist_mapping_deadband_px"]
                 )
-                state = {
-                    "source": "left_wrist",
-                    "decision": decision,
-                    "pad_relative_to_gripper": (
-                        "aligned" if decision == "aligned"
-                        else ("above" if decision == "move_right" else "below")
-                    ),
-                    "structured_target": {
-                        "center_px": list(target.center),
-                        "base_box_xywh": list(target.base_box),
-                        "confidence": target.confidence,
-                    },
-                }
-            else:
+            except RuntimeError as wrist_error:
                 state = {
                     "source": "main",
                     "wrist_structured_target_visible": False,
+                    "wrist_mapping_error": str(wrist_error),
                 }
                 state.update(main_guidance(
                     frame("main"),
@@ -166,9 +199,16 @@ def main() -> int:
                 time.sleep(0.25)
                 continue
             consecutive = 0
-            signed_step = float(config["step_m"])
-            if state["decision"] == "move_left":
-                signed_step = -signed_step
+            if state["source"] == "left_wrist_calibrated_mapping":
+                recommended = float(state["recommended_right_correction_m"])
+                signed_step = np.sign(recommended) * min(
+                    float(config["maximum_mapped_step_m"]),
+                    max(float(config["minimum_mapped_step_m"]), abs(recommended)),
+                )
+            else:
+                signed_step = float(config["step_m"])
+                if state["decision"] == "move_left":
+                    signed_step = -signed_step
             report["base_steps"].append(guarded_move_right(
                 signed_step,
                 speed_mps=float(config["speed_mps"]),

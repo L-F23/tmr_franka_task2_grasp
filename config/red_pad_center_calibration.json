@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "description": "Main-camera board-center calibration recorded from the thermal-pad center reference",
+  "distance_reference": "thermal_pad_center",
+  "distance_assignment": "main_image_right_to_left_is_52_41.5_29_16_cm",
+  "source_image": "outputs/stage3_main_layout.jpg",
+  "source_record": "config/latest_stage3_red_pad.json",
+  "reference_image_size_px": [1280, 720],
+  "sampling": {
+    "valid_frames": 12,
+    "center_estimator": "per-board multi-frame median",
+    "maximum_peak_to_peak_spread_px": [1.0, 0.5, 0.5, 6.5]
+  },
+  "model": {
+    "type": "principal_axis_polynomial",
+    "degree": 2,
+    "maximum_cross_track_px": 45.0,
+    "maximum_extrapolation_px": 35.0
+  },
+  "anchors": [
+    {
+      "center_px": [765.0, 434.5],
+      "distance_from_black_base_cm": 13.3
+    },
+    {
+      "center_px": [860.5, 431.5],
+      "distance_from_black_base_cm": 26.3
+    },
+    {
+      "center_px": [958.0, 430.0],
+      "distance_from_black_base_cm": 38.8
+    },
+    {
+      "center_px": [1046.0, 429.0],
+      "distance_from_black_base_cm": 49.3
+    }
+  ],
+  "validation": {
+    "quadratic_fit_rmse_cm": 0.0142,
+    "maximum_anchor_cross_track_px": 0.65,
+    "red_board_center_px": [1046.0, 429.0],
+    "uniform_distance_correction_cm": -2.7,
+    "latest_incremental_correction_cm": -0.8,
+    "red_board_distance_from_thermal_pad_center_cm": 49.3
+  }
+}

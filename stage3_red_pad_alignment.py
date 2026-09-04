@@ -11,21 +11,29 @@ import time
 import cv2
 import numpy as np
 
-from base_motion import guarded_move_right, split_lateral_move
+from base_motion import guarded_move_right, guarded_transport
 from colored_pad_detector import (
     annotate,
     best_red_wrist_target,
     detect_colored_pads,
+    estimate_red_station_from_reference,
     map_layout_to_distances,
 )
 
 
 ROOT = Path(__file__).resolve().parent
 VIEWER = "http://127.0.0.1:18081"
-KNOWN_DISTANCES_CM = [19.5, 32.9, 44.6, 58.0]
-# Operator-verified on the deployed table: the numbered pad stations lie to
-# the robot's left of the black-base grasp reference.  Distances are unsigned.
-RED_STATION_RIGHT_SIGN = -1.0
+# Current table calibration, supplied from the thermal-pad center.  The
+# operator specified image-right to image-left as 52/41.5/29/16 cm, then
+# requested cumulative uniform corrections totalling -2.7 cm.  Detector order
+# is image-left to image-right, hence the reversed corrected values below.
+KNOWN_DISTANCES_CM = [13.3, 26.3, 38.8, 49.3]
+DEFAULT_CENTER_CALIBRATION = ROOT / "config" / "red_pad_center_calibration.json"
+# Re-verified on the deployed table after the 2026-09-04 stopped run: positive
+# right motion takes the robot from the black-base reference toward the pads.
+# Distances from the visual fit remain unsigned.
+RED_STATION_RIGHT_SIGN = 1.0
+FAST_ALIGNMENT_SPEED_MPS = 0.04
 
 
 def red_station_right_offset_m(distance_cm: float) -> float:
@@ -42,7 +50,7 @@ def frame(camera: str) -> np.ndarray:
 
 
 def move_right(distance_m: float) -> dict:
-    return guarded_move_right(distance_m)
+    return guarded_move_right(distance_m, speed_mps=FAST_ALIGNMENT_SPEED_MPS)
 
 
 def observe_wrist(center_tolerance_px: float) -> dict:
@@ -71,6 +79,9 @@ def main() -> int:
     parser.add_argument("--center-tolerance-px", type=float, default=25.0)
     parser.add_argument("--probe-right-m", type=float, default=0.01)
     parser.add_argument(
+        "--center-calibration", type=Path, default=DEFAULT_CENTER_CALIBRATION,
+    )
+    parser.add_argument(
         "--wrist-closed-loop", action="store_true",
         help="explicitly enable wrist-Y probe/correction; default is advisory-only",
     )
@@ -79,19 +90,64 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    calibration = json.loads(args.center_calibration.read_text(encoding="utf-8"))
+    if calibration.get("schema_version") != 1:
+        raise ValueError("unsupported red-pad center calibration schema")
     main_image = frame("main")
     main_detections = detect_colored_pads(
         main_image, roi=(0.55, 0.50, 0.96, 0.70), minimum_area_px=100.0
     )
-    layout = map_layout_to_distances(main_detections, KNOWN_DISTANCES_CM)
+    try:
+        observed_layout = map_layout_to_distances(
+            main_detections, KNOWN_DISTANCES_CM
+        )
+        ordered = sorted(main_detections, key=lambda item: item.center_px[0])
+        live_anchors = [
+            {
+                "center_px": list(item.center_px),
+                "distance_from_black_base_cm": float(distance),
+            }
+            for item, distance in zip(ordered, KNOWN_DISTANCES_CM)
+        ]
+        # The center model requires increasing physical distance; image order
+        # is reversed at the present camera mounting, so sort independently.
+        live_anchors.sort(key=lambda item: item["distance_from_black_base_cm"])
+        live_calibration = {
+            **calibration,
+            "reference_image_size_px": [main_image.shape[1], main_image.shape[0]],
+            "anchors": live_anchors,
+        }
+        red_station = estimate_red_station_from_reference(
+            main_detections,
+            live_calibration,
+            (main_image.shape[1], main_image.shape[0]),
+        )
+        red_station["fit_source"] = "live_four_board_centers"
+    except ValueError as exc:
+        # All four boards are useful diagnostic context but are no longer
+        # required at runtime. One reliable red center is sufficient for the
+        # saved nonlinear center-to-distance calibration.
+        observed_layout = {"status": "incomplete", "detail": str(exc)}
+        red_station = estimate_red_station_from_reference(
+            main_detections,
+            calibration,
+            (main_image.shape[1], main_image.shape[0]),
+        )
+        red_station["fit_source"] = "saved_reference_centers"
+    raw_output = ROOT / "outputs" / "stage3_main_raw.jpg"
+    raw_output.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(raw_output), main_image)
     annotated = annotate(main_image, main_detections)
     output = ROOT / "outputs" / "stage3_main_layout.jpg"
     output.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(output), annotated)
     report = {
         "status": "observed",
-        "known_distances_from_black_base_cm": KNOWN_DISTANCES_CM,
-        "main_layout": layout,
+        "known_distances_from_thermal_pad_center_cm": KNOWN_DISTANCES_CM,
+        "main_layout": observed_layout,
+        "red_station_center_fit": red_station,
+        "center_calibration": str(args.center_calibration),
+        "main_raw_image": str(raw_output),
         "main_detections": [item.to_dict() for item in main_detections],
         "base_steps": [],
         "wrist_observations": [],
@@ -108,11 +164,23 @@ def main() -> int:
             raise RuntimeError("--from-black-base-reference is required for coarse motion")
         else:
             coarse_right_m = red_station_right_offset_m(
-                layout["red_station_distance_cm"]
+                red_station["distance_from_black_base_cm"]
             )
             report["red_station_signed_right_m"] = coarse_right_m
-            for step in split_lateral_move(coarse_right_m):
-                report["base_steps"].append(move_right(step))
+            transport_steps, actual_right_m = guarded_transport(
+                coarse_right_m,
+                tolerance_m=0.005,
+                maximum_steps=20,
+                mover=move_right,
+            )
+            report["base_steps"].extend(transport_steps)
+            report["coarse_transport"] = {
+                "requested_right_m": coarse_right_m,
+                "actual_right_m": actual_right_m,
+                "residual_right_m": coarse_right_m - actual_right_m,
+                "tolerance_m": 0.005,
+                "control": "accumulated_odometry_with_terminal_residual_compensation",
+            }
             time.sleep(0.5)
             observation = observe_wrist(args.center_tolerance_px)
             report["wrist_observations"].append(observation)

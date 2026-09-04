@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "fixed_pose": "stage5_main_retract_and_20deg_tilt_endpoint",
+  "reference_image": "captures/terminal_wrist_mapping_20260904/calibration_point_left.jpg",
+  "probe_image": "captures/terminal_wrist_mapping_20260904/after_robot_left_10mm_left.jpg",
+  "reference_red_feature": {
+    "center_px": [
+      506.29702187837944,
+      335.12365859745444
+    ],
+    "bbox_xywh": [
+      404,
+      254,
+      236,
+      160
+    ],
+    "area_px": 8014.0
+  },
+  "probe_red_feature": {
+    "center_px": [
+      518.8137707291222,
+      314.566132847338
+    ],
+    "bbox_xywh": [
+      402,
+      230,
+      238,
+      180
+    ],
+    "area_px": 12894.5
+  },
+  "probe_axis": "base_positive_y_robot_left",
+  "correction_gain": 1.2,
+  "commanded_terminal_left_correction_m": 0.012,
+  "actual_probe_left_m": 0.009910840640475649,
+  "red_center_delta_px_for_probe": [
+    12.516748850742772,
+    -20.55752575011644
+  ],
+  "red_center_jacobian_px_per_left_m": [
+    1262.9351338396718,
+    -2074.246423271097
+  ],
+  "return_to_reference_left_correction_m_per_pixel_xy": [
+    -0.00021414742021527846,
+    0.00035171602130015957
+  ],
+  "usage": "dot(observed_center-reference_center, correction_vector) gives the signed base-positive-Y tool correction to return to reference"
+}

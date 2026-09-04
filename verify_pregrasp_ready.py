@@ -37,10 +37,18 @@ def validate_errors(errors: dict, reference: dict) -> None:
         "position_error_m": float(reference["maximum_position_error_m"]),
         "orientation_error_deg": float(reference["maximum_orientation_error_deg"]),
     }
+    checked_names = list(limits)
+    if reference.get("allow_task_space_equivalent_redundant_solution", False):
+        # FR3 has seven joints for a six-dimensional tool pose.  IK may choose
+        # a different, valid elbow null-space configuration while placing the
+        # tool at the same calibrated Cartesian pregrasp pose.  Keep joint
+        # error as a diagnostic but gate such solutions in task space.
+        checked_names.remove("maximum_joint_error_rad")
     exceeded = [
         f"{name}={errors[name]:.6f}>{limit:.6f}"
         for name, limit in limits.items()
-        if float(errors[name]) > limit
+        if name in checked_names
+        and float(errors[name]) > limit
     ]
     if exceeded:
         raise RuntimeError("left arm is not at the calibrated pregrasp pose: " + ", ".join(exceeded))
@@ -86,6 +94,11 @@ def main() -> int:
             "position_error_m": reference["maximum_position_error_m"],
             "orientation_error_deg": reference["maximum_orientation_error_deg"],
         }
+        report["redundant_joint_solution_accepted"] = bool(
+            reference.get("allow_task_space_equivalent_redundant_solution", False)
+            and errors["maximum_joint_error_rad"]
+            > float(reference["maximum_joint_error_rad"])
+        )
         validate_errors(errors, reference)
         report["status"] = "pregrasp_ready"
         code = 0

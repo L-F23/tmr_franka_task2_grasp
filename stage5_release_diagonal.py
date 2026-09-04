@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import time
 
 import numpy as np
 import rclpy
@@ -83,9 +84,66 @@ class OrderedRelease(ThermalPadExecutor):
 
     def retract_tilt_and_open(
         self, plan: list[dict], start_x: float, open_after_m: float,
-        speed: float, opened_position: float, progress,
+        speed: float, opened_position: float, progress, *,
+        opening_start_position: float | None = None,
+        gripper_open_steps: int = 1,
+        gripper_open_step_dwell_s: float = 0.0,
     ) -> dict:
-        """Tilt from the first waypoint, open at 6 cm, then keep retracting."""
+        """Tilt from the first waypoint, open at the configured retreat, then continue."""
+        if gripper_open_steps > 1:
+            eligible = [
+                index
+                for index, waypoint in enumerate(plan, 1)
+                if float(start_x) - float(waypoint["position_m"][0])
+                >= float(open_after_m) - 1e-6
+            ]
+            if not eligible:
+                raise RuntimeError("release plan never reached the gripper-open distance")
+            step_count = min(int(gripper_open_steps), len(eligible))
+            schedule = np.rint(np.linspace(
+                eligible[0], eligible[-1], step_count
+            )).astype(int).tolist()
+            opening_start = float(
+                opened_position if opening_start_position is None
+                else opening_start_position
+            )
+            targets = np.linspace(
+                opening_start, float(opened_position), step_count + 1
+            )[1:].tolist()
+            scheduled_targets = dict(zip(schedule, targets))
+            final_gripper = None
+            started = False
+            for index, waypoint in enumerate(plan, 1):
+                result = self.move_ptp(
+                    waypoint["joint_positions_rad"],
+                    f"retract_dump_{index}_of_{len(plan)}",
+                    speed,
+                )
+                retreat = float(start_x) - float(waypoint["position_m"][0])
+                progress("motion", {**result, "retreat_m": retreat})
+                if index not in scheduled_targets:
+                    continue
+                if not started:
+                    progress("gripper_started", {"retreat_m": retreat})
+                    started = True
+                self.motion_gate()
+                final_gripper = self.command_gripper(
+                    scheduled_targets[index],
+                    f"slow_open_step_{schedule.index(index) + 1}_of_{step_count}",
+                )
+                progress("gripper_step", {
+                    **final_gripper,
+                    "retreat_m": retreat,
+                    "step": schedule.index(index) + 1,
+                    "step_count": step_count,
+                })
+                if gripper_open_step_dwell_s > 0.0:
+                    time.sleep(float(gripper_open_step_dwell_s))
+            if final_gripper is None:
+                raise RuntimeError("staged gripper opening did not execute")
+            progress("gripper_finished", final_gripper)
+            return final_gripper
+
         gripper_handle = None
         for index, waypoint in enumerate(plan, 1):
             result = self.move_ptp(
@@ -112,13 +170,35 @@ def main() -> int:
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
-    parser.add_argument("--backward-m", type=float, default=0.11)
-    parser.add_argument("--initial-down-m", type=float, default=0.008)
-    parser.add_argument("--down-m", type=float, default=0.062)
-    parser.add_argument("--tilt-down-deg", type=float, default=90.0)
-    parser.add_argument("--open-after-m", type=float, default=0.06)
+    parser.add_argument("--backward-m", type=float, default=0.10)
+    parser.add_argument("--initial-down-m", type=float, default=0.01)
+    parser.add_argument("--down-m", type=float, default=0.035)
+    parser.add_argument("--tilt-down-deg", type=float, default=20.0)
+    parser.add_argument("--open-after-m", type=float, default=0.08)
+    parser.add_argument(
+        "--open-travel-fraction", type=float, default=0.4,
+        help="fraction of the full closed-to-open gripper travel",
+    )
+    parser.add_argument("--gripper-open-steps", type=int, default=1)
+    parser.add_argument("--gripper-open-step-dwell-s", type=float, default=0.0)
+    parser.add_argument(
+        "--defer-gripper-open", action="store_true",
+        help="keep the gripper closed through this stage; a later lift stage must open it",
+    )
+    parser.add_argument(
+        "--terminal-left-correction-m", type=float, default=0.0,
+        help="calibrated base-frame +Y correction before the final extra tilt",
+    )
+    parser.add_argument(
+        "--final-lift-m", type=float, default=-0.005,
+        help="signed final finger-contact height change; negative moves down",
+    )
+    parser.add_argument("--final-extra-tilt-deg", type=float, default=25.0)
+    parser.add_argument("--follow-through-inward-m", type=float, default=0.025)
+    parser.add_argument("--follow-through-extra-tilt-deg", type=float, default=10.0)
+    parser.add_argument("--follow-through-contact-z-delta-m", type=float, default=0.0)
     parser.add_argument("--pre-open-contact-drop-m", type=float, default=0.015)
-    parser.add_argument("--maximum-contact-drop-m", type=float, default=0.07)
+    parser.add_argument("--maximum-contact-drop-m", type=float, default=0.045)
     parser.add_argument("--speed-rad-s", type=float, default=0.05)
     parser.add_argument("--descent-ease-power", type=float, default=2.0)
     args = parser.parse_args()
@@ -128,12 +208,32 @@ def main() -> int:
         parser.error("--backward-m must be in [0.10, 0.12]")
     if not 0.0 <= args.down_m <= 0.07:
         parser.error("--down-m must be in [0, 0.07]")
-    if not 0.0 < args.initial_down_m <= 0.01:
-        parser.error("--initial-down-m must be in (0, 0.01]")
+    if not 0.0 < args.initial_down_m <= 0.02:
+        parser.error("--initial-down-m must be in (0, 0.02]")
     if not 1.0 <= args.tilt_down_deg <= 90.0:
         parser.error("--tilt-down-deg must be in [1, 90]")
     if not 0.04 <= args.open_after_m < args.backward_m:
         parser.error("--open-after-m must be in [0.04, backward-m)")
+    if not 0.0 < args.open_travel_fraction <= 1.0:
+        parser.error("--open-travel-fraction must be in (0, 1]")
+    if not 1 <= args.gripper_open_steps <= 8:
+        parser.error("--gripper-open-steps must be in [1, 8]")
+    if not 0.0 <= args.gripper_open_step_dwell_s <= 1.0:
+        parser.error("--gripper-open-step-dwell-s must be in [0, 1]")
+    if not 0.0 <= args.terminal_left_correction_m <= 0.02:
+        parser.error("--terminal-left-correction-m must be in [0, 0.02]")
+    if args.terminal_left_correction_m > 0.0 and not args.defer_gripper_open:
+        parser.error("terminal left correction requires --defer-gripper-open")
+    if not -0.01 <= args.final_lift_m <= 0.03:
+        parser.error("--final-lift-m must be in [-0.01, 0.03]")
+    if not 0.0 <= args.final_extra_tilt_deg <= 30.0:
+        parser.error("--final-extra-tilt-deg must be in [0, 30]")
+    if not 0.0 <= args.follow_through_inward_m <= 0.05:
+        parser.error("--follow-through-inward-m must be in [0, 0.05]")
+    if not 0.0 <= args.follow_through_extra_tilt_deg <= 20.0:
+        parser.error("--follow-through-extra-tilt-deg must be in [0, 20]")
+    if not -0.01 <= args.follow_through_contact_z_delta_m <= 0.02:
+        parser.error("--follow-through-contact-z-delta-m must be in [-0.01, 0.02]")
     if not args.initial_down_m <= args.pre_open_contact_drop_m <= 0.025:
         parser.error("--pre-open-contact-drop-m must be between initial-down and 0.025")
     if not args.pre_open_contact_drop_m <= args.maximum_contact_drop_m <= 0.08:
@@ -155,8 +255,23 @@ def main() -> int:
         "requested_down_m": args.down_m,
         "descent_profile": "front_loaded_ease_out",
         "descent_ease_power": args.descent_ease_power,
-        "gripper_motion": "begin_opening_near_6cm; continue_retracting_while_opening",
+        "gripper_motion": (
+            "deferred_until_final_vertical_lift"
+            if args.defer_gripper_open
+            else "staged opening distributed across the remaining retreat"
+        ),
         "open_after_retreat_m": args.open_after_m,
+        "open_travel_fraction": args.open_travel_fraction,
+        "gripper_open_steps": args.gripper_open_steps,
+        "gripper_open_step_dwell_s": args.gripper_open_step_dwell_s,
+        "terminal_left_correction_m": args.terminal_left_correction_m,
+        "terminal_left_correction_source": "10mm wrist probe scaled by 1.2",
+        "final_combined_lift_m": args.final_lift_m,
+        "final_contact_z_delta_m": args.final_lift_m,
+        "final_extra_down_tilt_deg": args.final_extra_tilt_deg,
+        "follow_through_inward_m": args.follow_through_inward_m,
+        "follow_through_extra_down_tilt_deg": args.follow_through_extra_tilt_deg,
+        "follow_through_contact_z_delta_m": args.follow_through_contact_z_delta_m,
         "tilt_begins_at_retreat_fraction": 0.0,
         "tilt_down_deg": args.tilt_down_deg,
         "maximum_finger_contact_drop_m": args.maximum_contact_drop_m,
@@ -171,7 +286,7 @@ def main() -> int:
     try:
         if not node.ptp_client.wait_for_server(timeout_sec=5.0):
             raise RuntimeError("left PTP action unavailable")
-        if not node.gripper_client.wait_for_server(timeout_sec=5.0):
+        if not args.defer_gripper_open and not node.gripper_client.wait_for_server(timeout_sec=5.0):
             raise RuntimeError("left gripper action unavailable")
         wait_motion_inputs(node)
         errors = node.active_errors()
@@ -191,7 +306,7 @@ def main() -> int:
         contact_local = np.asarray(config["grasp"]["link8_to_finger_contact_local_m"], dtype=float)
         start_contact = np.asarray(start_position) + quaternion_matrix(orientation) @ contact_local
         plan, seed = node.solve_pose_segment(
-            "release_initial_down_8mm",
+            "release_initial_down",
             np.asarray(start_position, dtype=float), lowered_start,
             orientation, orientation, node.joints,
         )
@@ -201,7 +316,7 @@ def main() -> int:
         allowed_contact_drops = []
         descent_fractions = []
         open_fraction = args.open_after_m / args.backward_m
-        # Ten milestones make translation and the 90-degree dump simultaneous.
+        # Ten milestones make translation and the configured dump simultaneous.
         for index, fraction in enumerate(np.linspace(0.1, 1.0, 10), 1):
             descent_fraction = front_loaded_descent_fraction(
                 float(fraction), args.descent_ease_power
@@ -249,19 +364,141 @@ def main() -> int:
         report["descent_fraction_by_milestone"] = descent_fractions
         report["clearance_compensation_by_milestone_m"] = clearance_compensations
         report["planned_waypoint_count"] = len(plan)
-        opened = float(config["empty_cycle"]["open_position"])
+        fully_open = float(config["empty_cycle"]["open_position"])
+        closed = float(config["empty_cycle"]["closed_position"])
+        opened = closed + args.open_travel_fraction * (fully_open - closed)
+        report["commanded_partial_open_position"] = opened
         def progress(kind, value):
             if kind == "motion":
                 report["motions"].append(value)
+            elif kind == "gripper_step":
+                report.setdefault("gripper_steps", []).append(value)
             else:
                 report[kind] = value
             args.record.parent.mkdir(parents=True, exist_ok=True)
             args.record.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
-        final_gripper = node.retract_tilt_and_open(
-            plan, float(start_position[0]), args.open_after_m,
-            args.speed_rad_s, opened, progress,
+        if args.defer_gripper_open:
+            for index, waypoint in enumerate(plan, 1):
+                result = node.move_ptp(
+                    waypoint["joint_positions_rad"],
+                    f"retract_dump_{index}_of_{len(plan)}",
+                    args.speed_rad_s,
+                )
+                progress("motion", {
+                    **result,
+                    "retreat_m": float(start_position[0])
+                    - float(waypoint["position_m"][0]),
+                })
+            final_gripper = {
+                "status": "held_closed",
+                "open_deferred_to_final_vertical_lift": True,
+            }
+            progress("gripper_open_deferred", final_gripper)
+        else:
+            final_gripper = node.retract_tilt_and_open(
+                plan, float(start_position[0]), args.open_after_m,
+                args.speed_rad_s, opened, progress,
+                opening_start_position=closed,
+                gripper_open_steps=args.gripper_open_steps,
+                gripper_open_step_dwell_s=args.gripper_open_step_dwell_s,
+            )
+        if args.terminal_left_correction_m > 0.0:
+            corrected_position = np.asarray(previous_position, dtype=float) + np.array([
+                0.0, args.terminal_left_correction_m, 0.0,
+            ])
+            correction_plan, _ = node.solve_pose_segment(
+                "terminal_left_correction",
+                np.asarray(previous_position, dtype=float), corrected_position,
+                previous_orientation, previous_orientation, node.joints,
+            )
+            for index, waypoint in enumerate(correction_plan, 1):
+                result = node.move_ptp(
+                    waypoint["joint_positions_rad"],
+                    f"terminal_left_correction_{index}_of_{len(correction_plan)}",
+                    args.speed_rad_s,
+                )
+                progress("motion", {
+                    **result,
+                    "terminal_left_correction_m": float(
+                        waypoint["position_m"][1] - previous_position[1]
+                    ),
+                })
+            previous_position = corrected_position
+            report["terminal_left_corrected_link8_base_position_m"] = (
+                corrected_position.tolist()
+            )
+        final_orientation = tilt_axis_toward(
+            tilted_orientation,
+            motion["link8_gripper_approach_axis_local_xyz"],
+            -np.asarray(motion["ground_up_axis_xyz"], dtype=float),
+            args.final_extra_tilt_deg,
+        ).tolist()
+        # Rotate about the finger contact point, then apply the requested
+        # signed contact-height delta without letting wrist rotation amplify it.
+        contact_before = (
+            np.asarray(previous_position, dtype=float)
+            + quaternion_matrix(tilted_orientation) @ contact_local
         )
+        final_position = (
+            contact_before
+            + np.array([0.0, 0.0, args.final_lift_m])
+            - quaternion_matrix(final_orientation) @ contact_local
+        )
+        final_plan, _ = node.solve_pose_segment(
+            "final_down_tilt_while_lifting",
+            np.asarray(previous_position, dtype=float), final_position,
+            tilted_orientation, final_orientation, node.joints,
+        )
+        for index, waypoint in enumerate(final_plan, 1):
+            result = node.move_ptp(
+                waypoint["joint_positions_rad"],
+                f"final_down_tilt_lift_{index}_of_{len(final_plan)}",
+                args.speed_rad_s,
+            )
+            progress("motion", {
+                **result,
+                "retreat_m": float(start_position[0]) - float(waypoint["position_m"][0]),
+            })
+        follow_orientation = tilt_axis_toward(
+            final_orientation,
+            motion["link8_gripper_approach_axis_local_xyz"],
+            -np.asarray(motion["ground_up_axis_xyz"], dtype=float),
+            args.follow_through_extra_tilt_deg,
+        ).tolist()
+        final_contact = (
+            np.asarray(final_position, dtype=float)
+            + quaternion_matrix(final_orientation) @ contact_local
+        )
+        follow_contact = final_contact + np.array([
+            -args.follow_through_inward_m,
+            0.0,
+            args.follow_through_contact_z_delta_m,
+        ])
+        follow_position = (
+            follow_contact - quaternion_matrix(follow_orientation) @ contact_local
+        )
+        follow_plan, _ = node.solve_pose_segment(
+            "follow_through_inward_and_down_tilt",
+            final_position, follow_position,
+            final_orientation, follow_orientation, node.joints,
+        )
+        for index, waypoint in enumerate(follow_plan, 1):
+            result = node.move_ptp(
+                waypoint["joint_positions_rad"],
+                f"follow_through_inward_tilt_{index}_of_{len(follow_plan)}",
+                args.speed_rad_s,
+            )
+            progress("motion", {
+                **result,
+                "retreat_m": float(start_position[0]) - float(waypoint["position_m"][0]),
+            })
+        report["final_combined_target_link8_base_position_m"] = final_position.tolist()
+        report["final_combined_target_link8_orientation_xyzw"] = final_orientation
+        report["final_rotation_pivot"] = "finger_contact_point"
+        report["follow_through_target_contact_base_m"] = follow_contact.tolist()
+        report["follow_through_target_link8_base_position_m"] = follow_position.tolist()
+        report["follow_through_target_link8_orientation_xyzw"] = follow_orientation
         after_pose = node.fk(node.joints)
         after_position, after_orientation = pose_values(after_pose)
         report["after"] = {

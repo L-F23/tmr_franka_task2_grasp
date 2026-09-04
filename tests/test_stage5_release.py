@@ -71,6 +71,38 @@ def test_gripper_begins_at_6cm_and_arm_keeps_retracting():
     ]
 
 
+def test_slow_gripper_open_is_split_across_remaining_retreat():
+    events = []
+
+    class FakeExecutor:
+        def move_ptp(self, joints, label, speed):
+            events.append(("arm", label))
+            return {"label": label}
+
+        def motion_gate(self):
+            events.append(("gate",))
+
+        def command_gripper(self, position, label):
+            events.append(("gripper", position, label))
+            return {"position": position, "reached_goal": True}
+
+    plan = [
+        {"joint_positions_rad": [value] * 7, "position_m": [x, 0.0, 0.8]}
+        for value, x in zip((0.1, 0.2, 0.3, 0.4), (0.94, 0.92, 0.90, 0.88))
+    ]
+    progress = []
+    result = OrderedRelease.retract_tilt_and_open(
+        FakeExecutor(), plan, 1.0, 0.06, 0.05, 0.4,
+        lambda kind, value: progress.append((kind, value)),
+        opening_start_position=0.8, gripper_open_steps=4,
+    )
+
+    gripper_targets = [event[1] for event in events if event[0] == "gripper"]
+    assert np.allclose(gripper_targets, [0.7, 0.6, 0.5, 0.4])
+    assert result["position"] == 0.4
+    assert [kind for kind, _ in progress].count("gripper_step") == 4
+
+
 def test_clearance_compensation_prevents_contact_end_drop():
     position, compensation = clearance_compensated_position(
         [0.9, 0.0, 0.80], [0.0, 0.70710678, 0.0, 0.70710678],

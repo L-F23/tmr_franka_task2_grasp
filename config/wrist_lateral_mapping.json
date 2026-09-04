@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "fixed_pose": "left_stage1_pregrasp_start",
+  "reference_image": "captures/wrist_lateral_mapping_20260904/zero_left.jpg",
+  "reference_bbox_xywh": [
+    290,
+    160,
+    250,
+    155
+  ],
+  "reference_target_center_y_px": 237.5,
+  "minimum_template_confidence": 0.6,
+  "valid_center_y_error_px": [
+    -74.0,
+    62.0
+  ],
+  "mapping": {
+    "model": "zero_anchored_quadratic",
+    "input": "left_wrist_target_center_y_error_px",
+    "output": "commanded_base_right_correction_m",
+    "right_correction_m": {
+      "linear_m_per_px": -0.0004582552878039389,
+      "quadratic_m_per_px2": -5.209438681492085e-07,
+      "rmse_m": 0.0005664668194117424
+    },
+    "forward_diagnostic": {
+      "linear_px_per_m_right": 2200.367673078276,
+      "quadratic_px_per_m2_right": -5609.811461524272,
+      "rmse_px": 1.1038382796377693
+    },
+    "direction_semantics": {
+      "negative_correction": "move_base_left",
+      "positive_correction": "move_base_right"
+    }
+  }
+}

@@ -17,15 +17,15 @@ def test_grasp_pose_requires_lateral_confirmation_before_closing():
     pose = FULL_STAGE_ORDER.index("left_grasp_pose_reached")
     aligned = FULL_STAGE_ORDER.index("pregrasp_lateral_alignment_confirmed")
     closed = FULL_STAGE_ORDER.index("thermal_pad_grasped")
-    assert pose + 1 == aligned
-    assert aligned + 1 == closed
+    assert aligned + 1 == pose
+    assert pose + 1 == closed
 
 
 def test_release_order_has_clearance_before_restore():
     release = FULL_STAGE_ORDER.index(
-        "retract_and_tilt_immediately_open_at_6cm_then_continue"
+        "placement_retract_tilt_with_gripper_held"
     )
-    clearance = FULL_STAGE_ORDER.index("post_release_vertical_clearance_5cm")
+    clearance = FULL_STAGE_ORDER.index("gripper_open_then_vertical_clearance_5cm")
     restore = FULL_STAGE_ORDER.index("left_initial_restored")
     assert release + 1 == clearance
     assert clearance + 1 == restore

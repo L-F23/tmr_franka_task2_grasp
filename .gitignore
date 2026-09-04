@@ -4,3 +4,5 @@ __pycache__/
 outputs/
 runtime/
 *.pyc
+api.py
+config/latest_*.json

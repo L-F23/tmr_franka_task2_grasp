@@ -28,17 +28,24 @@ from mission_runtime import (
 ROOT = Path(__file__).resolve().parent
 DEFAULT_RECORD = ROOT / "config" / "latest_pregrasp_to_finish.json"
 
+# Fast physical profile validated against the deployed FR3 PTP action.  Keep
+# the near-table dump slower than free-space translation while avoiding the
+# former blanket 0.05 rad/s setting.
+FAST_ARM_SPEED_RAD_S = "0.08"
+FAST_RELEASE_SPEED_RAD_S = "0.065"
+
 STAGE_ORDER = (
     "services_and_live_cameras_verified",
+    "spine_restored_0_6m",
     "calibrated_pregrasp_pose_verified",
-    "grasp_pose_reached_2_5cm_forward",
     "pregrasp_lateral_alignment_confirmed",
+    "force_contact_then_retreat_18mm",
     "thermal_pad_grasped",
     "left_arm_lifted_12cm",
-    "red_pad_centered_under_left_wrist",
-    "placement_forward_12cm_down_12cm_complete",
-    "release_retract_tilt_and_open_complete",
-    "post_release_vertical_clearance_5cm",
+    "red_pad_station_reached_main_camera_wrist_advisory",
+    "placement_forward_143mm_down_12cm_complete",
+    "placement_retract_tilt_with_gripper_held",
+    "gripper_open_then_vertical_clearance_5cm",
     "left_initial_restored",
 )
 
@@ -51,90 +58,111 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
     return (
         (
             STAGE_ORDER[0],
-            python_command("quick_start.py", "--check-only"),
+            python_command("quick_start.py", "--parent-lock-held", "--check-only"),
             30.0,
         ),
         (
             STAGE_ORDER[1],
+            python_command("reset_spine_to_task_height.py", "--execute"),
+            620.0,
+        ),
+        (
+            STAGE_ORDER[2],
             python_command("verify_pregrasp_ready.py"),
             30.0,
         ),
         (
-            STAGE_ORDER[2],
-            python_command(
-                "set_stage1_start_from_current.py",
-                "--execute", "--backward-m", "0", "--forward-m", "0.025",
-                "--down-m", "0", "--up-m", "0",
-                "--speed-rad-s", "0.05", "--fast",
-                "--record", str(ROOT / "config" / "latest_stage1_start.json"),
-            ),
-            60.0,
-        ),
-        (
             STAGE_ORDER[3],
-            python_command("pregrasp_lateral_alignment.py", "--execute"),
+            python_command("black_base_pose_alignment.py", "--execute"),
             360.0,
         ),
         (
             STAGE_ORDER[4],
-            python_command("stage1_close_gripper.py", "--execute"),
-            60.0,
+            python_command(
+                "set_stage1_start_from_current.py",
+                "--execute", "--backward-m", "0", "--forward-m", "0.162",
+                "--down-m", "0", "--up-m", "0",
+                "--speed-rad-s", "0.025", "--fast",
+                "--guarded-contact-approach", "--contact-step-m", "0.002",
+                "--axis-force-delta-n", "2.5",
+                "--force-delta-norm-n", "4.0",
+                "--torque-delta-norm-nm", "1.5",
+                "--joint-torque-delta-nm", "2.0",
+                "--contact-consecutive-samples", "5",
+                "--contact-retreat-m", "0.018",
+                "--record", str(ROOT / "config" / "latest_stage1_start.json"),
+            ),
+            120.0,
         ),
         (
             STAGE_ORDER[5],
             python_command(
+                "stage1_close_gripper.py", "--execute",
+            ),
+            60.0,
+        ),
+        (
+            STAGE_ORDER[6],
+            python_command(
                 "set_stage1_start_from_current.py",
                 "--execute", "--backward-m", "0", "--forward-m", "0",
                 "--down-m", "0", "--up-m", "0.12",
-                "--speed-rad-s", "0.05", "--fast",
+                "--speed-rad-s", FAST_ARM_SPEED_RAD_S, "--fast",
                 "--record", str(ROOT / "config" / "latest_stage2_lift.json"),
             ),
             90.0,
         ),
         (
-            STAGE_ORDER[6],
+            STAGE_ORDER[7],
             python_command(
                 "stage3_red_pad_alignment.py",
-                "--execute", "--from-black-base-reference", "--wrist-closed-loop",
+                "--execute", "--from-black-base-reference",
             ),
             240.0,
         ),
         (
-            STAGE_ORDER[7],
+            STAGE_ORDER[8],
             python_command(
                 "set_stage1_start_from_current.py",
-                "--execute", "--backward-m", "0", "--forward-m", "0.12",
+                "--execute", "--backward-m", "0", "--forward-m", "0.143",
                 "--down-m", "0.12", "--up-m", "0",
-                "--speed-rad-s", "0.05", "--fast",
+                "--speed-rad-s", FAST_ARM_SPEED_RAD_S, "--fast",
                 "--record", str(ROOT / "config" / "latest_stage4_place_approach.json"),
             ),
             150.0,
         ),
         (
-            STAGE_ORDER[8],
+            STAGE_ORDER[9],
             python_command(
                 "stage5_release_diagonal.py", "--execute",
-                "--backward-m", "0.11", "--initial-down-m", "0.008",
-                "--down-m", "0.062", "--pre-open-contact-drop-m", "0.015",
-                "--maximum-contact-drop-m", "0.07",
-                "--tilt-down-deg", "90", "--open-after-m", "0.06",
-                "--speed-rad-s", "0.05",
+                "--backward-m", "0.10", "--initial-down-m", "0.015",
+                "--down-m", "0.035", "--pre-open-contact-drop-m", "0.015",
+                "--maximum-contact-drop-m", "0.05",
+                "--tilt-down-deg", "20", "--open-after-m", "0.08",
+                "--open-travel-fraction", "0.4", "--defer-gripper-open",
+                "--terminal-left-correction-m", "0.012",
+                "--final-lift-m", "-0.005", "--final-extra-tilt-deg", "25",
+                "--follow-through-inward-m", "0.020",
+                "--follow-through-extra-tilt-deg", "10",
+                "--follow-through-contact-z-delta-m", "0",
+                "--speed-rad-s", FAST_RELEASE_SPEED_RAD_S,
             ),
             120.0,
         ),
         (
-            STAGE_ORDER[9],
+            STAGE_ORDER[10],
             python_command(
                 "set_stage1_start_from_current.py",
                 "--execute", "--backward-m", "0", "--forward-m", "0",
                 "--down-m", "0", "--up-m", "0.05",
-                "--speed-rad-s", "0.05", "--fast",
+                "--open-gripper-before-motion",
+                "--speed-rad-s", FAST_ARM_SPEED_RAD_S, "--fast",
                 "--record", str(ROOT / "config" / "latest_post_release_clearance.json"),
             ),
             90.0,
         ),
         (
-            STAGE_ORDER[10],
+            STAGE_ORDER[11],
             python_command("restore_left_initial_direct.py"),
             150.0,
         ),
@@ -192,7 +220,7 @@ def execute(
         "completed_stages": [],
         "stage_results": [],
         "right_arm_commanded": False,
-        "spine_commanded": False,
+        "spine_commanded": True,
     }
     write_record(record_path, record)
     code = 2

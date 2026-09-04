@@ -152,6 +152,28 @@ def guarded_move_forward(
     return result
 
 
+def guarded_move_forward_continuous(
+    distance_m: float, *, speed_mps: float = 0.04, timeout_s: float = 80.0
+) -> dict:
+    """Execute one uninterrupted long fore/aft move with odometry feedback."""
+    if not 0.008 <= abs(distance_m) <= 2.0:
+        raise ValueError("absolute continuous distance must be in [0.008, 2.0] m")
+    completed = _run_remote_mover(
+        f"--forward-m {distance_m:.6f} --speed-mps {speed_mps:.4f} "
+        f"--timeout-s {timeout_s:.1f}",
+        timeout_s=timeout_s + 20.0,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"continuous guarded fore/aft move failed: {completed.stdout.strip()} "
+            f"{completed.stderr.strip()}"
+        )
+    result = _extract_last_json_object(completed.stdout)
+    if result.get("status") != "success":
+        raise RuntimeError(f"continuous fore/aft move did not succeed: {result}")
+    return result
+
+
 def guarded_transport(
     distance_m: float,
     *,

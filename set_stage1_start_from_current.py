@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from pathlib import Path
 
@@ -12,7 +13,7 @@ import numpy as np
 import rclpy
 from franka_spine_msgs.srv import GetPosition
 
-from execute_thermal_pad_grasp import ThermalPadExecutor
+from execute_thermal_pad_grasp import GuardedContactStop, ThermalPadExecutor
 from thermal_pad_ik import DEFAULT_CONFIG, ROOT, pose_values
 
 
@@ -27,6 +28,11 @@ def offset_targets(
     after_x = start + np.array([float(forward_m) - float(backward_m), 0.0, 0.0])
     after_z = after_x + np.array([0.0, 0.0, float(up_m) - float(down_m)])
     return after_x, after_z
+
+
+def contact_retreat_target(position, retreat_m: float) -> np.ndarray:
+    """Retract from measured contact along the ground-aligned approach axis."""
+    return np.asarray(position, dtype=float) - np.array([float(retreat_m), 0.0, 0.0])
 
 
 def wait_motion_inputs(node: ThermalPadExecutor, timeout_s: float = 10.0) -> None:
@@ -69,6 +75,22 @@ def main() -> int:
     parser.add_argument("--up-m", type=float, default=0.0)
     parser.add_argument("--speed-rad-s", type=float, default=0.05)
     parser.add_argument("--fast", action="store_true")
+    parser.add_argument(
+        "--guarded-contact-approach",
+        action="store_true",
+        help="open the gripper, then execute forward motion in force-guarded increments",
+    )
+    parser.add_argument("--contact-step-m", type=float, default=0.002)
+    parser.add_argument("--axis-force-delta-n", type=float, default=4.0)
+    parser.add_argument("--force-delta-norm-n", type=float, default=7.0)
+    parser.add_argument("--torque-delta-norm-nm", type=float, default=1.5)
+    parser.add_argument("--joint-torque-delta-nm", type=float, default=2.0)
+    parser.add_argument("--contact-consecutive-samples", type=int, default=3)
+    parser.add_argument("--contact-retreat-m", type=float, default=0.018)
+    parser.add_argument(
+        "--open-gripper-before-motion", action="store_true",
+        help="open the left gripper after planning and immediately before this motion",
+    )
     args = parser.parse_args()
     if not args.execute:
         parser.error("--execute is required for physical motion")
@@ -83,6 +105,17 @@ def main() -> int:
         and args.down_m == 0.0 and args.up_m == 0.0
     ):
         parser.error("at least one offset distance must be positive")
+    if args.guarded_contact_approach and not (
+        args.forward_m > 0.0
+        and args.backward_m == 0.0
+        and args.down_m == 0.0
+        and args.up_m == 0.0
+    ):
+        parser.error("guarded contact approach supports forward-only motion")
+    if args.guarded_contact_approach and not 0.0005 <= args.contact_step_m <= 0.003:
+        parser.error("guarded contact step must be between 0.5 mm and 3 mm")
+    if args.guarded_contact_approach and not 0.001 <= args.contact_retreat_m <= 0.02:
+        parser.error("contact retreat must be between 1 mm and 20 mm")
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
     rclpy.init()
@@ -99,11 +132,16 @@ def main() -> int:
         "base_commanded": False,
         "right_arm_commanded": False,
         "motions": [],
+        "guarded_contact_approach": bool(args.guarded_contact_approach),
     }
     code = 2
     try:
         if not node.ptp_client.wait_for_server(timeout_sec=5.0):
             raise RuntimeError("left PTP action unavailable")
+        if (args.guarded_contact_approach or args.open_gripper_before_motion) and not node.gripper_client.wait_for_server(
+            timeout_sec=5.0
+        ):
+            raise RuntimeError("left gripper action unavailable")
         wait_motion_inputs(node)
         report["before"] = pose_record(node)
         if report["before"]["active_errors"]:
@@ -115,7 +153,10 @@ def main() -> int:
             start_position, args.backward_m, args.down_m, args.forward_m, args.up_m
         )
         x_plan, seed = [], list(node.joints)
-        if args.backward_m > 0.0 or args.forward_m > 0.0:
+        if (
+            (args.backward_m > 0.0 or args.forward_m > 0.0)
+            and not args.guarded_contact_approach
+        ):
             direction = "forward" if args.forward_m > 0.0 else "backward"
             x_plan, seed = node.solve_cartesian_segment(
                 f"stage1_start_{direction}", start_position, after_x, orientation, seed
@@ -131,15 +172,97 @@ def main() -> int:
             "after_z_translation_m": after_z.tolist(),
             "orientation_xyzw": orientation,
         }
+        if args.open_gripper_before_motion:
+            report["gripper_open_before_motion"] = node.command_gripper(
+                float(config["empty_cycle"].get("open_position", 0.0)),
+                "open_immediately_before_final_lift",
+            )
+            if not report["gripper_open_before_motion"]["reached_goal"]:
+                raise RuntimeError("left gripper did not open before final lift")
         x_label = "forward" if args.forward_m > 0.0 else "backward"
         z_label = "up" if args.up_m > 0.0 else "down"
-        for label, plan in ((x_label, x_plan), (z_label, z_plan)):
-            for waypoint in plan:
-                report["motions"].append(node.move_ptp(
-                    waypoint["joint_positions_rad"],
-                    f"stage1_start_{label}_{waypoint['index']}",
-                    args.speed_rad_s,
-                ))
+        if args.guarded_contact_approach:
+            report["gripper_open"] = node.command_gripper(
+                float(config["empty_cycle"].get("open_position", 0.0)),
+                "open_before_guarded_approach",
+            )
+            if not report["gripper_open"]["reached_goal"]:
+                raise RuntimeError("left gripper did not reach the open position")
+            report["external_wrench_baseline"] = node.capture_external_wrench_baseline(
+                approach_axis=0,
+                axis_force_delta_n=args.axis_force_delta_n,
+                force_delta_norm_n=args.force_delta_norm_n,
+                torque_delta_norm_nm=args.torque_delta_norm_nm,
+                joint_torque_delta_nm=args.joint_torque_delta_nm,
+                consecutive_samples=args.contact_consecutive_samples,
+            )
+            increment_count = int(math.ceil(args.forward_m / args.contact_step_m))
+            cursor_position = start_position.copy()
+            contact_detected = False
+            try:
+                for increment in range(1, increment_count + 1):
+                    travelled = min(args.forward_m, increment * args.contact_step_m)
+                    target = start_position + np.array([travelled, 0.0, 0.0])
+                    plan, seed = node.solve_cartesian_segment(
+                        f"guarded_forward_{increment}",
+                        cursor_position,
+                        target,
+                        orientation,
+                        seed,
+                    )
+                    for waypoint in plan:
+                        report["motions"].append(node.move_ptp(
+                            waypoint["joint_positions_rad"],
+                            f"guarded_forward_{increment}_{waypoint['index']}",
+                            args.speed_rad_s,
+                        ))
+                    cursor_position = target
+            except GuardedContactStop:
+                contact_detected = True
+                report["external_contact_stop"] = node.contact_stop
+                node.disable_contact_guard()
+                report["post_cancel_stationary"] = node.wait_arm_stationary()
+                errors_after_contact = node.active_errors()
+                if errors_after_contact:
+                    raise RuntimeError(
+                        "Franka error after contact stop; automatic retract blocked: "
+                        + ",".join(errors_after_contact)
+                    )
+                contact_pose = pose_record(node)
+                report["contact_pose"] = contact_pose
+                retreat_position = contact_retreat_target(
+                    contact_pose["link8_base_position_m"], args.contact_retreat_m
+                )
+                retreat_plan, _ = node.solve_cartesian_segment(
+                    "post_contact_retreat",
+                    np.asarray(contact_pose["link8_base_position_m"], dtype=float),
+                    retreat_position,
+                    contact_pose["link8_base_orientation_xyzw"],
+                    list(node.joints),
+                )
+                for waypoint in retreat_plan:
+                    report["motions"].append(node.move_ptp(
+                        waypoint["joint_positions_rad"],
+                        f"post_contact_retreat_{waypoint['index']}",
+                        min(args.speed_rad_s, 0.015),
+                    ))
+                report["post_contact_retreat_m"] = float(args.contact_retreat_m)
+            finally:
+                node.disable_contact_guard()
+            if not contact_detected:
+                raise RuntimeError(
+                    "no external contact detected within guarded approach limit; "
+                    "gripper remains open"
+                )
+            report["guarded_contact_then_retreat_complete"] = True
+        else:
+            for label, plan in ((x_label, x_plan), (z_label, z_plan)):
+                for waypoint in plan:
+                    report["motions"].append(node.move_ptp(
+                        waypoint["joint_positions_rad"],
+                        f"stage1_start_{label}_{waypoint['index']}",
+                        args.speed_rad_s,
+                    ))
         report["after"] = pose_record(node)
         report["recommended_retracted_link8_position_m"] = report["after"][
             "link8_base_position_m"
@@ -149,6 +272,8 @@ def main() -> int:
     except Exception as exc:
         report["status"] = "blocked"
         report["error"] = str(exc)
+        if node.contact_stop is not None:
+            report["external_contact_stop"] = node.contact_stop
         if node.joints is not None and node.spine_position is not None:
             try:
                 report["stopped_at"] = pose_record(node)

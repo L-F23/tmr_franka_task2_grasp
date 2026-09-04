@@ -1,10 +1,18 @@
+import json
+from pathlib import Path
+
 import cv2
 import numpy as np
+import pytest
 
 from colored_pad_detector import (
+    ColoredPad,
     best_red_wrist_target,
     detect_colored_pads,
+    estimate_red_station_from_reference,
+    fit_center_distance_model,
     map_layout_to_distances,
+    predict_distance_from_center,
 )
 from base_motion import split_lateral_move
 
@@ -32,6 +40,43 @@ def test_maps_sorted_visual_centers_to_known_distances():
     result = map_layout_to_distances(detections, [19.5, 32.9, 44.6, 58.0])
     assert result["red_station_distance_cm"] == 19.5
     assert result["linear_distance_cm_from_main_x_px"]["rmse_cm"] < 0.5
+
+
+def test_saved_centers_form_low_residual_quadratic_distance_model():
+    calibration = json.loads(Path(
+        "config/red_pad_center_calibration.json"
+    ).read_text(encoding="utf-8"))
+    model = fit_center_distance_model(calibration["anchors"], degree=2)
+    assert model["rmse_cm"] < 0.10
+    for anchor in calibration["anchors"]:
+        prediction = predict_distance_from_center(
+            anchor["center_px"], model,
+            maximum_cross_track_px=45.0,
+            maximum_extrapolation_px=35.0,
+        )
+        assert prediction["distance_from_black_base_cm"] == pytest.approx(
+            anchor["distance_from_black_base_cm"], abs=0.15
+        )
+
+
+def test_red_center_is_recognized_independently_and_evaluated_by_fit():
+    calibration = json.loads(Path(
+        "config/red_pad_center_calibration.json"
+    ).read_text(encoding="utf-8"))
+    red = ColoredPad(
+        color="red",
+        center_px=(1046.0, 429.0),
+        bbox_xywh=(997, 388, 69, 76),
+        area_px=1697.0,
+        fill_ratio=0.8,
+        mean_saturation=170.0,
+        confidence=0.9,
+    )
+    result = estimate_red_station_from_reference(
+        [red], calibration, image_size_px=(1280, 720)
+    )
+    assert result["detected_red_center_px"] == [1046.0, 429.0]
+    assert result["distance_from_black_base_cm"] == pytest.approx(49.3, abs=0.15)
 
 
 def test_long_coarse_move_is_split_into_guarded_steps():

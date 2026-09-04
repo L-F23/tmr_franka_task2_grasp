@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "semantics": "wall docking and ZED black-stand acquisition parameters; controller bridge reused by the CCW-restore pipeline",
+  "rotation_ccw_deg": 90.0,
+  "rotation_speed_rad_s": 0.14,
+  "rear_wall_clearance_m": 0.22,
+  "wall_distance_translation_authorized": false,
+  "rear_body_extent_m": 0.40,
+  "wall_translation_speed_m_s": 0.025,
+  "wall_angle_tolerance_deg": 1.8,
+  "wall_clearance_tolerance_m": 0.018,
+  "right_search_step_m": 0.08,
+  "maximum_right_search_m": 3.2,
+  "required_consecutive_visible_frames": 2,
+  "maximum_camera_frame_age_s": 0.5,
+  "camera": {
+    "viewer_base_url": "http://127.0.0.1:18081",
+    "stream_name": "main"
+  }
+}
