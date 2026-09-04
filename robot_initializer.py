@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed Task 2 startup reset. No command targets the right arm."""
+"""Fail-closed Task 2 startup reset for Spine and both FR3 arms."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ DEFAULT_CONFIG = ROOT / "config" / "initial_pose.json"
 DEFAULT_RECORD = ROOT / "config" / "latest_initial_state.json"
 ROS_ENV = Path("/home/aup/tmr_env.sh")
 RESTORE_LEFT = ROOT / "restore_left_initial_direct.py"
+RESTORE_RIGHT = ROOT / "restore_right_parking_direct.py"
 SPINE_API = "https://172.16.16.10/spine/api"
 
 
@@ -123,16 +124,32 @@ def restore_left_arm() -> dict:
     return result
 
 
+def restore_right_arm() -> dict:
+    if not RESTORE_RIGHT.is_file():
+        raise InitializationError(f"missing right-arm parking script: {RESTORE_RIGHT}")
+    output = run_ros(f"python3 {RESTORE_RIGHT}", timeout=120.0)
+    start = output.find("{")
+    if start < 0:
+        raise InitializationError(f"right-arm parking returned no JSON\n{output}")
+    result = json.loads(output[start:])
+    if result.get("status") != "success":
+        raise InitializationError(f"right-arm parking failed: {result}")
+    return result
+
+
 def initialize(config_path: Path = DEFAULT_CONFIG,
                record_path: Path = DEFAULT_RECORD) -> dict:
     config = json.loads(config_path.read_text(encoding="utf-8"))
     record = {
         "schema_version": 1,
         "started_at_unix": time.time(),
-        "sequence": ["open_left_gripper", "move_spine", "restore_left_arm"],
-        "right_arm_commanded": False,
+        "sequence": [
+            "open_left_gripper", "move_spine", "restore_right_arm", "restore_left_arm"
+        ],
+        "right_arm_commanded": True,
         "left_gripper": open_left_gripper(config),
         "spine": move_spine(config),
+        "right_arm": restore_right_arm(),
         "left_arm": restore_left_arm(),
     }
     record.update(completed_at_unix=time.time(), status="ready")

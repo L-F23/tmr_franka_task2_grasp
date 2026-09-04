@@ -24,7 +24,7 @@ DEFAULT_RECORD = ROOT / "config" / "latest_full_thermal_pad_cycle.json"
 MAX_PREPARED_RECORD_AGE_S = 20.0
 FULL_STAGE_ORDER = (
     "left_runtime_ready",
-    "left_initial_verified_before_base_transport",
+    "spine_and_both_arms_initialized_before_base_transport",
     "isolated_base_runtime_ready",
     "base_right_2m_complete",
     "black_base_and_thermal_pad_centered",
@@ -116,8 +116,8 @@ def main() -> int:
         "ordered_stages": [],
         "stage_results": [],
         "base_transport_steps": [],
-        "right_arm_commanded": False,
-        "spine_commanded": False,
+        "right_arm_commanded": True,
+        "spine_commanded": True,
         "active_stage": None,
     }
     atomic_write_json(args.record, record)
@@ -140,6 +140,16 @@ def main() -> int:
         record["ordered_stages"].append(FULL_STAGE_ORDER[0])
         record["active_stage"] = FULL_STAGE_ORDER[1]
         atomic_write_json(args.record, record)
+        record["stage_results"].append(run(
+            python_command("reset_spine_to_task_height.py", "--execute"),
+            "restore_spine_before_base_transport",
+            620.0,
+        ))
+        record["stage_results"].append(run(
+            python_command("restore_right_parking_direct.py"),
+            "restore_right_parking_before_base_transport",
+            150.0,
+        ))
         record["stage_results"].append(run(
             python_command("restore_left_initial_direct.py"),
             "restore_left_initial_before_base_transport",

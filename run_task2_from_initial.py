@@ -33,6 +33,7 @@ DEFAULT_RECORD = ROOT / "config" / "latest_task2_from_initial.json"
 STAGE_ORDER = (
     "services_and_live_cameras_verified",
     "spine_restored_0_6m",
+    "right_arm_parking_restored",
     "left_initial_restored",
     "left_pregrasp_reached",
     "calibrated_pregrasp_pose_verified",
@@ -50,8 +51,8 @@ STAGE_ORDER = (
 
 def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
     continuation = pregrasp_stage_commands()
-    # Reuse the previously tested stages, replacing only their initial
-    # assumptions with the explicit reset -> pregrasp transition.
+    # Reuse the previously tested stages, replacing their health, Spine and
+    # right-parking assumptions with the explicit initialization below.
     return (
         (
             STAGE_ORDER[0],
@@ -65,11 +66,16 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
         ),
         (
             STAGE_ORDER[2],
-            python_command("restore_left_initial_direct.py"),
+            python_command("restore_right_parking_direct.py"),
             150.0,
         ),
         (
             STAGE_ORDER[3],
+            python_command("restore_left_initial_direct.py"),
+            150.0,
+        ),
+        (
+            STAGE_ORDER[4],
             python_command(
                 "execute_thermal_pad_grasp.py",
                 "--execute", "--empty-cycle", "--fast",
@@ -78,11 +84,11 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
             ),
             180.0,
         ),
-        # Skip the pregrasp-only runner's health and Spine-reset stages, but
+        # Skip its health, Spine-reset and right-parking stages, but
         # retain its independent measured-joint/FK validation and every later
         # stage. Spine was reset above while the arm was still at its safer
         # initial pose.
-        *continuation[2:-1],
+        *continuation[3:-1],
         (
             STAGE_ORDER[-1],
             python_command("restore_left_initial_direct.py"),

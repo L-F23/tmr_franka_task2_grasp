@@ -15,6 +15,12 @@ def test_route_parameters_match_operator_sequence():
 
 
 def test_route_orders_search_before_wall_and_wrist_alignment():
+    assert ROUTE_STAGES.index("spine_restored_0_6m") < ROUTE_STAGES.index(
+        "restore_counterclockwise_90deg"
+    )
+    assert ROUTE_STAGES.index("right_arm_parking_restored") < ROUTE_STAGES.index(
+        "restore_counterclockwise_90deg"
+    )
     assert ROUTE_STAGES.index("search_right_until_target_or_150cm") < ROUTE_STAGES.index(
         "rear_wall_baseline_restored"
     )

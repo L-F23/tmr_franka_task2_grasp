@@ -13,6 +13,14 @@ def test_isolated_base_runtime_starts_before_transport():
     )
 
 
+def test_spine_and_both_arms_are_initialized_before_transport():
+    initialized = FULL_STAGE_ORDER.index(
+        "spine_and_both_arms_initialized_before_base_transport"
+    )
+    transport = FULL_STAGE_ORDER.index("base_right_2m_complete")
+    assert initialized < transport
+
+
 def test_grasp_pose_requires_lateral_confirmation_before_closing():
     pose = FULL_STAGE_ORDER.index("left_grasp_pose_reached")
     aligned = FULL_STAGE_ORDER.index("pregrasp_lateral_alignment_confirmed")

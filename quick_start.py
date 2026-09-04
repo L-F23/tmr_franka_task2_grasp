@@ -38,11 +38,14 @@ REQUIRED_SERVICES = {
     "/left_ik/compute_fk",
     "/left_ik/compute_ik",
     "/franka_spine_node/get_position",
+    "/right/controller_manager/list_hardware_components",
+    "/right/controller_manager/list_controllers",
 }
 REQUIRED_ACTIONS = {
     "/left/action_server/error_recovery",
     "/left/action_server/ptp_motion",
     "/left/gripper/robotiq_gripper_controller/gripper_cmd",
+    "/right/action_server/ptp_motion",
 }
 
 

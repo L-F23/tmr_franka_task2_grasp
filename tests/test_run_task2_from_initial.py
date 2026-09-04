@@ -8,12 +8,14 @@ def command_for(label: str) -> list[str]:
 def test_task2_initial_transition_is_reset_then_pregrasp_then_verify():
     health = STAGE_ORDER.index("services_and_live_cameras_verified")
     spine = STAGE_ORDER.index("spine_restored_0_6m")
+    right = STAGE_ORDER.index("right_arm_parking_restored")
     reset = STAGE_ORDER.index("left_initial_restored")
     pregrasp = STAGE_ORDER.index("left_pregrasp_reached")
     verified = STAGE_ORDER.index("calibrated_pregrasp_pose_verified")
     aligned = STAGE_ORDER.index("pregrasp_lateral_alignment_confirmed")
     assert health + 1 == spine
-    assert spine + 1 == reset
+    assert spine + 1 == right
+    assert right + 1 == reset
     assert reset + 1 == pregrasp
     assert pregrasp + 1 == verified
     assert verified + 1 == aligned
@@ -23,6 +25,14 @@ def test_spine_reset_uses_dedicated_spine_only_stage():
     command = command_for("spine_restored_0_6m")
     assert command[2].endswith("reset_spine_to_task_height.py")
     assert "--execute" in command
+
+
+def test_right_arm_is_restored_to_recorded_parking_pose_before_left_reset():
+    command = command_for("right_arm_parking_restored")
+    assert command[2].endswith("restore_right_parking_direct.py")
+    assert STAGE_ORDER.index("right_arm_parking_restored") < STAGE_ORDER.index(
+        "left_initial_restored"
+    )
 
 
 def test_pregrasp_transition_is_stage_start_only_and_does_not_grip():

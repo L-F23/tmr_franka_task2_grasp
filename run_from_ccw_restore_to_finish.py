@@ -2,8 +2,9 @@
 """Run Task 2 from the pending CCW restore turn through final arm restore.
 
 Entry condition: the left arm is already at the calibrated pregrasp pose, the
-gripper is open, the spine is at the Task 2 height, and the preceding clockwise
-turn has completed.  The first physical command is the 90 degree CCW restore.
+gripper is open, and the preceding clockwise turn has completed.  Spine and
+the right-arm parking pose are restored before the first base motion, which is
+the 90 degree CCW restore.
 """
 
 from __future__ import annotations
@@ -51,13 +52,14 @@ REAR_WALL_ANGLE_DEG = 1.136309
 
 ROUTE_STAGES = (
     "services_and_cameras_preflight",
+    "spine_restored_0_6m",
+    "right_arm_parking_restored",
     "pregrasp_entry_pose_verified",
     "restore_counterclockwise_90deg",
     "base_backward_55cm",
     "base_right_140cm",
     "search_right_until_target_or_150cm",
     "rear_wall_baseline_restored",
-    "spine_restored_0_6m",
     "pregrasp_pose_reverified",
     "robust_black_base_pose_alignment_confirmed",
     "grasp_transport_place_and_left_restore",
@@ -77,7 +79,7 @@ def execute(record_path: Path) -> int:
             "preceding clockwise turn complete; left arm at calibrated pregrasp; "
             "gripper open"
         ),
-        "first_physical_motion": "counterclockwise_90deg",
+        "first_base_motion": "counterclockwise_90deg",
         "parameters": {
             "restore_ccw_deg": RESTORE_CCW_DEG,
             "backward_m": BACKWARD_M,
@@ -90,7 +92,7 @@ def execute(record_path: Path) -> int:
         "completed_stages": [],
         "stage_results": {},
         "physical_motion_authorized": True,
-        "right_arm_commanded": False,
+        "right_arm_commanded": True,
     }
     write_record(record_path, record)
 
@@ -116,28 +118,40 @@ def execute(record_path: Path) -> int:
 
         active(ROUTE_STAGES[1])
         complete(ROUTE_STAGES[1], run_stage(
-            ROUTE_STAGES[1], python_command("verify_pregrasp_ready.py"), 30.0
+            ROUTE_STAGES[1],
+            python_command("reset_spine_to_task_height.py", "--execute"),
+            620.0,
         ))
 
         active(ROUTE_STAGES[2])
-        complete(ROUTE_STAGES[2], run_base_controller([
+        complete(ROUTE_STAGES[2], run_stage(
+            ROUTE_STAGES[2], python_command("restore_right_parking_direct.py"), 150.0
+        ))
+
+        active(ROUTE_STAGES[3])
+        complete(ROUTE_STAGES[3], run_stage(
+            ROUTE_STAGES[3], python_command("verify_pregrasp_ready.py"), 30.0
+        ))
+
+        active(ROUTE_STAGES[4])
+        complete(ROUTE_STAGES[4], run_base_controller([
             "--mode", "rotate",
             "--ccw-deg", f"{RESTORE_CCW_DEG:.3f}",
             "--yaw-speed-rps", "0.200",
             "--timeout-s", "45",
         ], 50.0))
 
-        active(ROUTE_STAGES[3])
-        complete(ROUTE_STAGES[3], guarded_move_forward_continuous(
+        active(ROUTE_STAGES[5])
+        complete(ROUTE_STAGES[5], guarded_move_forward_continuous(
             -BACKWARD_M, speed_mps=0.04, timeout_s=35.0
         ))
 
-        active(ROUTE_STAGES[4])
-        complete(ROUTE_STAGES[4], guarded_move_right_continuous(
+        active(ROUTE_STAGES[6])
+        complete(ROUTE_STAGES[6], guarded_move_right_continuous(
             PRESEARCH_RIGHT_M, speed_mps=0.04, timeout_s=55.0
         ))
 
-        active(ROUTE_STAGES[5])
+        active(ROUTE_STAGES[7])
         search_args = Namespace(
             initial_left_m=0.0,
             maximum_right_m=MAXIMUM_SEARCH_RIGHT_M,
@@ -154,12 +168,12 @@ def execute(record_path: Path) -> int:
             raise RuntimeError(
                 f"right target search failed with exit code {search_code}"
             )
-        complete(ROUTE_STAGES[5], json.loads(
+        complete(ROUTE_STAGES[7], json.loads(
             DEFAULT_SEARCH_RECORD.read_text(encoding="utf-8")
         ))
 
-        active(ROUTE_STAGES[6])
-        complete(ROUTE_STAGES[6], run_base_controller([
+        active(ROUTE_STAGES[8])
+        complete(ROUTE_STAGES[8], run_base_controller([
             "--mode", "wall-align",
             "--wall-clearance-m", f"{REAR_CLEARANCE_M:.9f}",
             "--wall-angle-deg", f"{REAR_WALL_ANGLE_DEG:.6f}",
@@ -170,27 +184,25 @@ def execute(record_path: Path) -> int:
             "--timeout-s", "120",
         ], 125.0))
 
-        active(ROUTE_STAGES[7])
-        complete(ROUTE_STAGES[7], run_stage(
-            ROUTE_STAGES[7],
-            python_command("reset_spine_to_task_height.py", "--execute"),
-            620.0,
-        ))
-
-        active(ROUTE_STAGES[8])
-        complete(ROUTE_STAGES[8], run_stage(
-            ROUTE_STAGES[8], python_command("verify_pregrasp_ready.py"), 30.0
-        ))
-
         active(ROUTE_STAGES[9])
         complete(ROUTE_STAGES[9], run_stage(
-            ROUTE_STAGES[9],
+            ROUTE_STAGES[9], python_command("verify_pregrasp_ready.py"), 30.0
+        ))
+
+        active(ROUTE_STAGES[10])
+        complete(ROUTE_STAGES[10], run_stage(
+            ROUTE_STAGES[10],
             python_command("black_base_pose_alignment.py", "--execute"),
             360.0,
         ))
 
-        active(ROUTE_STAGES[10])
-        remaining = finish_stage_commands()[4:]
+        active(ROUTE_STAGES[11])
+        continuation = finish_stage_commands()
+        first_grasp_stage = next(
+            index for index, (label, _command, _timeout) in enumerate(continuation)
+            if label == "force_contact_then_retreat_18mm"
+        )
+        remaining = continuation[first_grasp_stage:]
         finish_code = execute_finish(
             DEFAULT_FINISH_RECORD,
             stages=remaining,
@@ -209,7 +221,7 @@ def execute(record_path: Path) -> int:
             raise RuntimeError(
                 f"grasp-to-finish pipeline failed with exit code {finish_code}"
             )
-        complete(ROUTE_STAGES[10], json.loads(
+        complete(ROUTE_STAGES[11], json.loads(
             DEFAULT_FINISH_RECORD.read_text(encoding="utf-8")
         ))
 

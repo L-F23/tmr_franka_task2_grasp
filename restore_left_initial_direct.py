@@ -26,21 +26,25 @@ RESTORE_SPEED_RAD_S = 0.08
 
 
 class DirectRestore(Node):
-    def __init__(self):
-        super().__init__("left_initial_direct_ptp")
+    def __init__(self, side: str = "left"):
+        if side not in {"left", "right"}:
+            raise ValueError("side must be 'left' or 'right'")
+        super().__init__(f"{side}_initial_direct_ptp")
+        self.side = side
+        self.joint_names = [f"{side}_fr3v2_joint{i}" for i in range(1, 8)]
         self.q = None
         self.create_subscription(
             JointState,
-            "/left/franka_robot_state_broadcaster/measured_joint_states",
+            f"/{side}/franka_robot_state_broadcaster/measured_joint_states",
             self._joints,
             qos_profile_sensor_data,
         )
-        self.action = ActionClient(self, PTPMotion, "/left/action_server/ptp_motion")
+        self.action = ActionClient(self, PTPMotion, f"/{side}/action_server/ptp_motion")
 
     def _joints(self, message):
         mapped = dict(zip(message.name, message.position))
-        if all(name in mapped for name in JOINT_NAMES):
-            self.q = [float(mapped[name]) for name in JOINT_NAMES]
+        if all(name in mapped for name in self.joint_names):
+            self.q = [float(mapped[name]) for name in self.joint_names]
 
     def wait_state(self, timeout=5.0):
         self.q = None
@@ -48,14 +52,14 @@ class DirectRestore(Node):
         while self.q is None and time.monotonic() < deadline:
             rclpy.spin_once(self, timeout_sec=0.05)
         if self.q is None:
-            raise RuntimeError("left measured joints unavailable")
+            raise RuntimeError(f"{self.side} measured joints unavailable")
 
     def run(self, target=None, speed_rad_s=RESTORE_SPEED_RAD_S):
         target = list(TARGET if target is None else map(float, target))
         self.wait_state()
         start = list(self.q)
         if not self.action.wait_for_server(timeout_sec=5.0):
-            raise RuntimeError("left PTP action unavailable")
+            raise RuntimeError(f"{self.side} PTP action unavailable")
         goal = PTPMotion.Goal()
         goal.goal_joint_configuration = target
         goal.maximum_joint_velocities = [float(speed_rad_s)] * 7
@@ -75,7 +79,7 @@ class DirectRestore(Node):
             raise RuntimeError("left initial PTP timeout")
         if wrapped.status != GoalStatus.STATUS_SUCCEEDED:
             raise RuntimeError(
-                f"left initial PTP did not succeed (action_status={wrapped.status})"
+                f"{self.side} initial PTP did not succeed (action_status={wrapped.status})"
             )
         target_status = int(wrapped.result.target_status.status)
         if target_status != wrapped.result.target_status.TARGET_REACHED:
@@ -87,7 +91,7 @@ class DirectRestore(Node):
         error = max(abs(a - b) for a, b in zip(self.q, target))
         if error > 0.012:
             raise RuntimeError(
-                f"left initial endpoint error {error:.6f} rad (status={wrapped.status})"
+                f"{self.side} initial endpoint error {error:.6f} rad (status={wrapped.status})"
             )
         return {
             "status": "success",

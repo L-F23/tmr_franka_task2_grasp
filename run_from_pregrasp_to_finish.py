@@ -37,6 +37,7 @@ FAST_RELEASE_SPEED_RAD_S = "0.065"
 STAGE_ORDER = (
     "services_and_live_cameras_verified",
     "spine_restored_0_6m",
+    "right_arm_parking_restored",
     "calibrated_pregrasp_pose_verified",
     "pregrasp_lateral_alignment_confirmed",
     "force_contact_then_retreat_18mm",
@@ -68,16 +69,21 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
         ),
         (
             STAGE_ORDER[2],
+            python_command("restore_right_parking_direct.py"),
+            150.0,
+        ),
+        (
+            STAGE_ORDER[3],
             python_command("verify_pregrasp_ready.py"),
             30.0,
         ),
         (
-            STAGE_ORDER[3],
+            STAGE_ORDER[4],
             python_command("black_base_pose_alignment.py", "--execute"),
             360.0,
         ),
         (
-            STAGE_ORDER[4],
+            STAGE_ORDER[5],
             python_command(
                 "set_stage1_start_from_current.py",
                 "--execute", "--backward-m", "0", "--forward-m", "0.162",
@@ -95,14 +101,14 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
             120.0,
         ),
         (
-            STAGE_ORDER[5],
+            STAGE_ORDER[6],
             python_command(
                 "stage1_close_gripper.py", "--execute",
             ),
             60.0,
         ),
         (
-            STAGE_ORDER[6],
+            STAGE_ORDER[7],
             python_command(
                 "set_stage1_start_from_current.py",
                 "--execute", "--backward-m", "0", "--forward-m", "0",
@@ -113,7 +119,7 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
             90.0,
         ),
         (
-            STAGE_ORDER[7],
+            STAGE_ORDER[8],
             python_command(
                 "stage3_red_pad_alignment.py",
                 "--execute", "--from-black-base-reference",
@@ -121,7 +127,7 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
             240.0,
         ),
         (
-            STAGE_ORDER[8],
+            STAGE_ORDER[9],
             python_command(
                 "set_stage1_start_from_current.py",
                 "--execute", "--backward-m", "0", "--forward-m", "0.143",
@@ -132,7 +138,7 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
             150.0,
         ),
         (
-            STAGE_ORDER[9],
+            STAGE_ORDER[10],
             python_command(
                 "stage5_release_diagonal.py", "--execute",
                 "--backward-m", "0.10", "--initial-down-m", "0.015",
@@ -150,7 +156,7 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
             120.0,
         ),
         (
-            STAGE_ORDER[10],
+            STAGE_ORDER[11],
             python_command(
                 "set_stage1_start_from_current.py",
                 "--execute", "--backward-m", "0", "--forward-m", "0",
@@ -162,7 +168,7 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
             90.0,
         ),
         (
-            STAGE_ORDER[11],
+            STAGE_ORDER[12],
             python_command("restore_left_initial_direct.py"),
             150.0,
         ),
@@ -219,8 +225,14 @@ def execute(
         "physical_motion_authorized": True,
         "completed_stages": [],
         "stage_results": [],
-        "right_arm_commanded": False,
-        "spine_commanded": True,
+        "right_arm_commanded": any(
+            label == "right_arm_parking_restored"
+            for label, _command, _timeout in selected_stages
+        ),
+        "spine_commanded": any(
+            label == "spine_restored_0_6m"
+            for label, _command, _timeout in selected_stages
+        ),
     }
     write_record(record_path, record)
     code = 2

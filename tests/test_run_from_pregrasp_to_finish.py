@@ -18,9 +18,10 @@ def test_runner_checks_health_then_resets_spine_before_pose_gate():
     assert stages[0][1][-1] == "--check-only"
     assert stages[1][1][2].endswith("reset_spine_to_task_height.py")
     assert "--execute" in stages[1][1]
-    assert stages[2][1][2].endswith("verify_pregrasp_ready.py")
+    assert stages[2][1][2].endswith("restore_right_parking_direct.py")
+    assert stages[3][1][2].endswith("verify_pregrasp_ready.py")
     assert "--execute" not in stages[0][1]
-    assert "--execute" not in stages[2][1]
+    assert "--execute" not in stages[3][1]
     assert "--parent-lock-held" in stages[0][1]
 
 
@@ -33,6 +34,13 @@ def test_runner_excludes_transport_search_and_pregrasp_motion():
     assert not any(
         argument in commands
         for argument in ("--base-right-m", "--right-m", "--left-m")
+    )
+
+
+def test_runner_parks_right_arm_before_pregrasp_verification():
+    labels = [label for label, _command, _timeout in stage_commands()]
+    assert labels.index("right_arm_parking_restored") < labels.index(
+        "calibrated_pregrasp_pose_verified"
     )
 
 
