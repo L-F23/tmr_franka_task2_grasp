@@ -23,6 +23,13 @@ from colored_pad_detector import (
 ROOT = Path(__file__).resolve().parent
 VIEWER = "http://127.0.0.1:18081"
 KNOWN_DISTANCES_CM = [19.5, 32.9, 44.6, 58.0]
+# Operator-verified on the deployed table: the numbered pad stations lie to
+# the robot's left of the black-base grasp reference.  Distances are unsigned.
+RED_STATION_RIGHT_SIGN = -1.0
+
+
+def red_station_right_offset_m(distance_cm: float) -> float:
+    return RED_STATION_RIGHT_SIGN * float(distance_cm) / 100.0
 
 
 def frame(camera: str) -> np.ndarray:
@@ -100,7 +107,10 @@ def main() -> int:
         elif not args.from_black_base_reference:
             raise RuntimeError("--from-black-base-reference is required for coarse motion")
         else:
-            coarse_right_m = float(layout["red_station_distance_cm"]) / 100.0
+            coarse_right_m = red_station_right_offset_m(
+                layout["red_station_distance_cm"]
+            )
+            report["red_station_signed_right_m"] = coarse_right_m
             for step in split_lateral_move(coarse_right_m):
                 report["base_steps"].append(move_right(step))
             time.sleep(0.5)

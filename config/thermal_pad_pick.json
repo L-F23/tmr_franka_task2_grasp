@@ -94,6 +94,27 @@
   },
   "initial_joints_rad": [-1.71976900100708, -1.6329213380813599, 1.8240526914596558, -2.447446823120117, 2.177191972732544, 0.8496646285057068, -3.05077862739563],
   "initial_joint_tolerance_rad": 0.025,
+  "pregrasp_start": {
+    "semantics": "left arm is already at the calibrated retracted grasp-preparation pose; base is at the black-base reference",
+    "expected_joint_positions_rad": [
+      0.22886455749365048,
+      1.4870408072238115,
+      0.3542144501408379,
+      -1.915193639419097,
+      2.8749430333718755,
+      1.1413685117884613,
+      -1.1149685584367128
+    ],
+    "expected_link8_base_position_m": [
+      0.8430917236012355,
+      -0.0509436641200179,
+      0.8361689727608205
+    ],
+    "expected_link8_base_orientation_xyzw": [0.5, -0.5, 0.5, -0.5],
+    "maximum_joint_error_rad": 0.035,
+    "maximum_position_error_m": 0.02,
+    "maximum_orientation_error_deg": 5.0
+  },
   "empty_cycle": {
     "retracted_link8_position_m": [0.8430917236012355, -0.0509436641200179, 0.8361689727608205],
     "previous_grasp_link8_height_m": 0.8361689727608205,
