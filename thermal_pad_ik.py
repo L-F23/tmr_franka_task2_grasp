@@ -132,6 +132,16 @@ class ThermalPadPlanner(Node):
         )
         self.spine_client = self.create_client(GetPosition, kin["spine_position_service"])
 
+    @property
+    def collision_guard_enabled(self) -> bool:
+        return bool(self.cfg["kinematics"].get("avoid_collisions", True))
+
+    def planning_services(self):
+        services = [self.fk_client, self.ik_client, self.spine_client]
+        if self.collision_guard_enabled:
+            services.extend([self.validity_client, self.motion_plan_client])
+        return services
+
     def _color(self, msg):
         self.color = self.bridge.imgmsg_to_cv2(msg, "bgr8")
         self.color_stamp = stamp_s(msg)
@@ -176,14 +186,7 @@ class ThermalPadPlanner(Node):
         return future.result()
 
     def wait_inputs(self, timeout=12.0):
-        services = (
-            self.fk_client,
-            self.ik_client,
-            self.validity_client,
-            self.motion_plan_client,
-            self.spine_client,
-        )
-        for service in services:
+        for service in self.planning_services():
             if not service.wait_for_service(timeout_sec=3.0):
                 raise PlanningError(f"service unavailable: {service.srv_name}")
         spine = self.call(self.spine_client, GetPosition.Request())
@@ -277,6 +280,8 @@ class ThermalPadPlanner(Node):
         return [float(mapped[name]) for name in JOINT_NAMES]
 
     def state_valid(self, joints: list[float]) -> tuple[bool, list[list[str]]]:
+        if not self.collision_guard_enabled:
+            return True, []
         request = GetStateValidity.Request()
         request.group_name = self.cfg["kinematics"]["group"]
         names, positions = self.model_joint_state(joints)
@@ -353,6 +358,27 @@ class ThermalPadPlanner(Node):
             candidates,
             key=lambda values: max(abs(a - b) for a, b in zip(values, seed)),
         )
+        if not self.collision_guard_enabled:
+            maximum_step = float(kin["maximum_joint_step_rad"])
+            delta = max(abs(a - b) for a, b in zip(target_joints, seed))
+            subdivisions = max(1, int(math.ceil(delta / maximum_step)))
+            result = []
+            previous = list(seed)
+            for joints in interpolate(
+                np.asarray(seed), np.asarray(target_joints), subdivisions
+            ):
+                step = max(abs(a - b) for a, b in zip(joints, previous))
+                result.append({
+                    "index": len(result) + 1,
+                    "position_m": None,
+                    "orientation_xyzw": None,
+                    "joint_positions_rad": joints.tolist(),
+                    "maximum_joint_step_rad": step,
+                    "collision_checked_interpolation_samples": 0,
+                    "planner": "direct_joint_interpolation_collision_guard_disabled",
+                })
+                previous = joints.tolist()
+            return result, previous
         request = GetMotionPlan.Request()
         motion = request.motion_plan_request
         motion.group_name = kin["group"]
@@ -422,6 +448,8 @@ class ThermalPadPlanner(Node):
     def validate_joint_segment(self, label, start, target):
         invalid = []
         samples = int(self.cfg["kinematics"]["path_samples_per_segment"])
+        if not self.collision_guard_enabled:
+            return 0
         for index, joints in enumerate(interpolate(np.asarray(start), np.asarray(target), samples), 1):
             valid, contacts = self.state_valid(joints.tolist())
             if not valid:
@@ -623,7 +651,8 @@ class ThermalPadPlanner(Node):
         return {
             "schema_version": 1,
             "status": "valid",
-            "semantics": "FK/IK and collision validation only; no motion or gripper command sent",
+            "semantics": "FK/IK validation only; no motion or gripper command sent",
+            "collision_guard_enabled": self.collision_guard_enabled,
             "base_stationary": True,
             "right_arm_commanded": False,
             "planning_scope_max_segment": int(max_segment),

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replan, then execute only segment 1 of the guarded thermal-pad sequence."""
+"""Replan, then execute only segment 1 of the thermal-pad sequence."""
 
 from __future__ import annotations
 
@@ -121,7 +121,10 @@ class ThermalPadExecutor(ThermalPadPlanner):
         if not waypoints:
             return []
         maximum_jump = float(self.cfg["empty_cycle"].get("fast_max_joint_jump_rad", 0.20))
-        samples = int(self.cfg["empty_cycle"].get("fast_collision_samples", 10))
+        samples = (
+            int(self.cfg["empty_cycle"].get("fast_collision_samples", 10))
+            if self.collision_guard_enabled else 0
+        )
         compressed = []
         previous = np.asarray(start, dtype=float)
         cursor = 0
@@ -140,11 +143,12 @@ class ThermalPadExecutor(ThermalPadPlanner):
                     waypoints[candidate_index]["joint_positions_rad"], dtype=float
                 )
                 collision_free = True
-                for sample in np.linspace(previous, candidate, samples + 1)[1:]:
-                    valid, _ = self.state_valid(sample.tolist())
-                    if not valid:
-                        collision_free = False
-                        break
+                if self.collision_guard_enabled:
+                    for sample in np.linspace(previous, candidate, samples + 1)[1:]:
+                        valid, _ = self.state_valid(sample.tolist())
+                        if not valid:
+                            collision_free = False
+                            break
                 if collision_free:
                     accepted = candidate_index
                     break
@@ -164,13 +168,7 @@ class ThermalPadExecutor(ThermalPadPlanner):
 
     def plan_empty_cycle(self, *, resume: bool = False, fast: bool = False) -> dict:
         """Plan the requested fixed empty-gripper demonstration without perception."""
-        for service in (
-            self.fk_client,
-            self.ik_client,
-            self.validity_client,
-            self.motion_plan_client,
-            self.spine_client,
-        ):
+        for service in self.planning_services():
             if not service.wait_for_service(timeout_sec=3.0):
                 raise RuntimeError(f"service unavailable: {service.srv_name}")
         spine = self.call(self.spine_client, GetPosition.Request())
@@ -372,7 +370,7 @@ def main() -> int:
     parser.add_argument(
         "--fast",
         action="store_true",
-        help="use collision-checked waypoint compression and shorter settling waits",
+        help="use bounded waypoint compression and shorter settling waits",
     )
     parser.add_argument(
         "--isolated-base-zero-locked",

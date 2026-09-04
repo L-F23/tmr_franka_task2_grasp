@@ -38,7 +38,7 @@
     "ik_service": "/left_ik/compute_ik",
     "validity_service": "/left_ik/check_state_validity",
     "motion_plan_service": "/left_ik/plan_kinematic_path",
-    "avoid_collisions": true,
+    "avoid_collisions": false,
     "ik_timeout_s": 1.0,
     "ik_candidate_attempts": 64,
     "minimum_ik_candidates": 12,

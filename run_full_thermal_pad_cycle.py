@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the guarded 2 m approach and complete thermal-pad transfer cycle."""
+"""Run the odometry-closed-loop 2 m approach and thermal-pad transfer cycle."""
 
 from __future__ import annotations
 
@@ -11,6 +11,12 @@ import subprocess
 import time
 
 from base_motion import guarded_move_right_continuous
+from mission_runtime import (
+    MissionAlreadyRunning,
+    acquire_motion_lock,
+    atomic_write_json,
+    release_motion_lock,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -77,6 +83,7 @@ def main() -> int:
     parser.add_argument("--maximum-alignment-steps", type=int, default=20)
     parser.add_argument("--record", type=Path, default=DEFAULT_RECORD)
     parser.add_argument("--prepared-record", type=Path)
+    parser.add_argument("--parent-lock-held", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--resume-after-transport", action="store_true",
         help="resume at visual alignment after a completed initial base transport",
@@ -93,6 +100,14 @@ def main() -> int:
     if not 0.0 < args.initial_right_m <= 2.0:
         parser.error("--initial-right-m must be in (0, 2.0]")
 
+    lock = None
+    if not args.parent_lock_held:
+        try:
+            lock = acquire_motion_lock()
+        except MissionAlreadyRunning as exc:
+            print(json.dumps({"status": "blocked", "error": str(exc)}, indent=2))
+            return 73
+
     record = {
         "status": "running",
         "started_at_unix_s": time.time(),
@@ -103,9 +118,13 @@ def main() -> int:
         "base_transport_steps": [],
         "right_arm_commanded": False,
         "spine_commanded": False,
+        "active_stage": None,
     }
+    atomic_write_json(args.record, record)
     code = 2
     try:
+        record["active_stage"] = FULL_STAGE_ORDER[0]
+        atomic_write_json(args.record, record)
         if args.prepared_record is None:
             record["stage_results"].append(run(
                 python_command("bootstrap_left_runtime.py", "--state-only"),
@@ -119,12 +138,16 @@ def main() -> int:
                 "prepared_at_unix_s": prepared["prepared_at_unix_s"],
             })
         record["ordered_stages"].append(FULL_STAGE_ORDER[0])
+        record["active_stage"] = FULL_STAGE_ORDER[1]
+        atomic_write_json(args.record, record)
         record["stage_results"].append(run(
             python_command("restore_left_initial_direct.py"),
             "restore_left_initial_before_base_transport",
             150.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[1])
+        record["active_stage"] = FULL_STAGE_ORDER[2]
+        atomic_write_json(args.record, record)
 
         if args.prepared_record is None:
             record["stage_results"].append(run(
@@ -137,10 +160,12 @@ def main() -> int:
             ))
         else:
             # The prepared record is consumed quickly and validated above;
-            # the base's guarded mover still performs fresh odom/LiDAR/lease
-            # checks before every physical step.
+            # the base mover still checks fresh odometry and the exclusive
+            # mission command subscriber before every physical step.
             record["stage_results"].append({"label": "quick_start_base_runtime_reused"})
         record["ordered_stages"].append(FULL_STAGE_ORDER[2])
+        record["active_stage"] = FULL_STAGE_ORDER[3]
+        atomic_write_json(args.record, record)
 
         if args.resume_after_transport:
             transport_result = {"status": "reused", "motion_commanded": False}
@@ -152,6 +177,8 @@ def main() -> int:
             print(json.dumps({"continuous_base_transport": transport_result}), flush=True)
             record["actual_initial_right_m"] = float(transport_result["actual_right_m"])
         record["ordered_stages"].append(FULL_STAGE_ORDER[3])
+        record["active_stage"] = FULL_STAGE_ORDER[4]
+        atomic_write_json(args.record, record)
 
         record["stage_results"].append(run(
             python_command(
@@ -163,6 +190,8 @@ def main() -> int:
             420.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[4])
+        record["active_stage"] = FULL_STAGE_ORDER[5]
+        atomic_write_json(args.record, record)
 
         record["stage_results"].append(run(
             python_command("table_edge_positioning.py", "--execute"),
@@ -170,6 +199,8 @@ def main() -> int:
             180.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[5])
+        record["active_stage"] = FULL_STAGE_ORDER[6]
+        atomic_write_json(args.record, record)
 
         record["stage_results"].append(run(
             python_command(
@@ -182,6 +213,8 @@ def main() -> int:
             180.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[6])
+        record["active_stage"] = FULL_STAGE_ORDER[7]
+        atomic_write_json(args.record, record)
 
         record["stage_results"].append(run(
             python_command(
@@ -195,6 +228,8 @@ def main() -> int:
             60.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[7])
+        record["active_stage"] = FULL_STAGE_ORDER[8]
+        atomic_write_json(args.record, record)
 
         record["stage_results"].append(run(
             python_command("pregrasp_lateral_alignment.py", "--execute"),
@@ -202,6 +237,8 @@ def main() -> int:
             360.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[8])
+        record["active_stage"] = FULL_STAGE_ORDER[9]
+        atomic_write_json(args.record, record)
 
         record["stage_results"].append(run(
             python_command("stage1_close_gripper.py", "--execute"),
@@ -209,6 +246,8 @@ def main() -> int:
             60.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[9])
+        record["active_stage"] = FULL_STAGE_ORDER[10]
+        atomic_write_json(args.record, record)
 
         record["stage_results"].append(run(
             python_command(
@@ -222,6 +261,8 @@ def main() -> int:
             90.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[10])
+        record["active_stage"] = FULL_STAGE_ORDER[11]
+        atomic_write_json(args.record, record)
 
         record["stage_results"].append(run(
             python_command(
@@ -232,6 +273,8 @@ def main() -> int:
             180.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[11])
+        record["active_stage"] = FULL_STAGE_ORDER[12]
+        atomic_write_json(args.record, record)
 
         record["stage_results"].append(run(
             python_command(
@@ -245,6 +288,8 @@ def main() -> int:
             150.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[12])
+        record["active_stage"] = FULL_STAGE_ORDER[13]
+        atomic_write_json(args.record, record)
 
         record["stage_results"].append(run(
             python_command(
@@ -259,6 +304,8 @@ def main() -> int:
             120.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[13])
+        record["active_stage"] = FULL_STAGE_ORDER[14]
+        atomic_write_json(args.record, record)
 
         record["stage_results"].append(run(
             python_command(
@@ -272,6 +319,8 @@ def main() -> int:
             90.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[14])
+        record["active_stage"] = FULL_STAGE_ORDER[15]
+        atomic_write_json(args.record, record)
 
         record["stage_results"].append(run(
             python_command("restore_left_initial_direct.py"),
@@ -279,16 +328,21 @@ def main() -> int:
             150.0,
         ))
         record["ordered_stages"].append(FULL_STAGE_ORDER[15])
+        record.pop("active_stage", None)
         record["status"] = "complete"
         code = 0
+    except KeyboardInterrupt:
+        record["status"] = "interrupted"
+        record["error"] = "operator interrupt"
+        code = 130
     except Exception as exc:
         record["status"] = "blocked"
         record["error"] = str(exc)
     finally:
         record["completed_at_unix_s"] = time.time()
-        args.record.parent.mkdir(parents=True, exist_ok=True)
-        args.record.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        atomic_write_json(args.record, record)
         print(json.dumps(record, indent=2), flush=True)
+        release_motion_lock(lock)
     return code
 
 

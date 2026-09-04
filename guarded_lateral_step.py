@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute one signed lateral base step with odometry and dual-LiDAR guards."""
+"""Execute one signed base step with optional dual-LiDAR collision guarding."""
 
 from __future__ import annotations
 
@@ -45,12 +45,20 @@ def yaw_of(quaternion) -> float:
 
 
 class GuardedLateralStep(Node):
-    def __init__(self, right_m: float, speed_mps: float, forward_m: float = 0.0) -> None:
+    def __init__(
+        self,
+        right_m: float,
+        speed_mps: float,
+        forward_m: float = 0.0,
+        *,
+        collision_guard_enabled: bool = True,
+    ) -> None:
         super().__init__("tmr_guarded_lateral_step")
         self.right_m = right_m
         self.forward_m = forward_m
         self.axis_kind = "forward" if abs(forward_m) > 0.0 else "right"
         self.speed_mps = speed_mps
+        self.collision_guard_enabled = bool(collision_guard_enabled)
         self.pose = None
         self.velocity = None
         self.odom_at = 0.0
@@ -59,13 +67,14 @@ class GuardedLateralStep(Node):
         self.command_pub = self.create_publisher(TwistStamped, COMMAND_TOPIC, 10)
         self.lease_pub = self.create_publisher(Bool, LEASE_TOPIC, 10)
         self.create_subscription(Odometry, ODOM_TOPIC, self._odom, qos_profile_sensor_data)
-        for topic in SCAN_TOPICS:
-            self.create_subscription(
-                LaserScan,
-                topic,
-                lambda message, source=topic: self._scan(source, message),
-                qos_profile_sensor_data,
-            )
+        if self.collision_guard_enabled:
+            for topic in SCAN_TOPICS:
+                self.create_subscription(
+                    LaserScan,
+                    topic,
+                    lambda message, source=topic: self._scan(source, message),
+                    qos_profile_sensor_data,
+                )
 
     def _odom(self, message: Odometry) -> None:
         p = message.pose.pose.position
@@ -122,7 +131,7 @@ class GuardedLateralStep(Node):
         while time.monotonic() < deadline:
             rclpy.spin_once(self, timeout_sec=0.05)
             now = time.monotonic()
-            scans_ready = all(
+            scans_ready = not self.collision_guard_enabled or all(
                 topic in self.scan_points and now - self.scan_points[topic][0] < 0.35
                 for topic in SCAN_TOPICS
             )
@@ -139,10 +148,12 @@ class GuardedLateralStep(Node):
             ):
                 return
         raise RuntimeError(
-            "fresh odometry, stationary base, dual LiDAR, or velocity adapter unavailable"
+            "fresh odometry, stationary base, collision sensors, or velocity adapter unavailable"
         )
 
     def clearance(self, direction: float, speed: float) -> float | None:
+        if not self.collision_guard_enabled:
+            return None
         now = time.monotonic()
         if any(
             topic not in self.scan_points or now - self.scan_points[topic][0] > 0.35
@@ -254,6 +265,7 @@ class GuardedLateralStep(Node):
         )
         result = {
             "status": "success",
+            "collision_guard_enabled": self.collision_guard_enabled,
             "error_m": actual - requested,
             "yaw_error_deg": math.degrees(wrap(end_yaw - start_yaw)),
             "minimum_directional_clearance_m": (
@@ -270,6 +282,7 @@ class GuardedLateralStep(Node):
         direction = 1.0 if requested > 0 else -1.0
         return {
             "status": "ready",
+            "collision_guard_enabled": self.collision_guard_enabled,
             "direction": (
                 ("right" if direction > 0 else "left")
                 if self.axis_kind == "right"
@@ -288,6 +301,7 @@ def main() -> int:
     parser.add_argument("--speed-mps", type=float, default=0.025)
     parser.add_argument("--timeout-s", type=float, default=8.0)
     parser.add_argument("--check-only", action="store_true")
+    parser.add_argument("--disable-collision-guard", action="store_true")
     args = parser.parse_args()
     distance = args.forward_m if args.forward_m is not None else args.right_m
     if not 0.008 <= abs(distance) <= 2.0:
@@ -296,7 +310,10 @@ def main() -> int:
         parser.error("speed must be in [0.008, 0.04] m/s")
     rclpy.init()
     node = GuardedLateralStep(
-        args.right_m or 0.0, args.speed_mps, forward_m=args.forward_m or 0.0
+        args.right_m or 0.0,
+        args.speed_mps,
+        forward_m=args.forward_m or 0.0,
+        collision_guard_enabled=not args.disable_collision_guard,
     )
     try:
         result = node.check_only() if args.check_only else node.run(args.timeout_s)

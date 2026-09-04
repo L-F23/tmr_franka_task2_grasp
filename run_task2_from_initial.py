@@ -5,22 +5,25 @@ The robot services must already be running.  This entry does not perform the
 initial 2 m base transport, black-base search, or table-edge alignment.  It
 first restores the left arm to the recorded Task 2 initial joints, immediately
 moves it to the calibrated pregrasp pose, verifies that pose, and only then
-continues with the guarded grasp and transfer sequence.
+continues with the verified grasp and transfer sequence.
 """
 
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 from pathlib import Path
 
 from run_from_pregrasp_to_finish import (
-    LOCK_FILE,
     ROOT,
     execute,
     python_command,
     stage_commands as pregrasp_stage_commands,
+)
+from mission_runtime import (
+    MissionAlreadyRunning,
+    acquire_motion_lock,
+    release_motion_lock,
 )
 
 
@@ -95,17 +98,9 @@ def main() -> int:
         }, indent=2))
         return 0
 
-    LOCK_FILE.touch(exist_ok=True)
-    with LOCK_FILE.open("r+") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print(json.dumps({
-                "status": "blocked",
-                "error": "another Task 2 transfer run is active",
-                "physical_motion_commanded": False,
-            }, indent=2))
-            return 73
+    lock = None
+    try:
+        lock = acquire_motion_lock()
         return execute(
             args.record,
             stages=stages,
@@ -119,6 +114,15 @@ def main() -> int:
                 "table_edge_fore_aft_alignment",
             ],
         )
+    except MissionAlreadyRunning as exc:
+        print(json.dumps({
+            "status": "blocked",
+            "error": str(exc),
+            "physical_motion_commanded": False,
+        }, indent=2))
+        return 73
+    finally:
+        release_motion_lock(lock)
 
 
 if __name__ == "__main__":

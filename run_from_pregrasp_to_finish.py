@@ -10,17 +10,23 @@ is issued only after read-only service/camera and pose gates pass.
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import os
 from pathlib import Path
 import subprocess
 import time
 
+from mission_runtime import (
+    LOCK_FILE,
+    MissionAlreadyRunning,
+    acquire_motion_lock,
+    atomic_write_json,
+    release_motion_lock,
+)
+
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_RECORD = ROOT / "config" / "latest_pregrasp_to_finish.json"
-LOCK_FILE = Path("/tmp/tmr_task2_pregrasp_to_finish.lock")
 
 STAGE_ORDER = (
     "services_and_live_cameras_verified",
@@ -136,10 +142,7 @@ def stage_commands() -> tuple[tuple[str, list[str], float], ...]:
 
 
 def write_record(path: Path, record: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    atomic_write_json(path, record)
 
 
 def run_stage(label: str, command: list[str], timeout_s: float) -> dict:
@@ -233,18 +236,19 @@ def main() -> int:
         }, indent=2))
         return 0
 
-    LOCK_FILE.touch(exist_ok=True)
-    with LOCK_FILE.open("r+") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print(json.dumps({
-                "status": "blocked",
-                "error": "another pregrasp-to-finish run is active",
-                "physical_motion_commanded": False,
-            }, indent=2))
-            return 73
+    lock = None
+    try:
+        lock = acquire_motion_lock()
         return execute(args.record)
+    except MissionAlreadyRunning as exc:
+        print(json.dumps({
+            "status": "blocked",
+            "error": str(exc),
+            "physical_motion_commanded": False,
+        }, indent=2))
+        return 73
+    finally:
+        release_motion_lock(lock)
 
 
 if __name__ == "__main__":

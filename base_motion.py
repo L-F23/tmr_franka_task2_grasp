@@ -1,13 +1,14 @@
-"""Shared guarded lateral-base motion helpers for the isolated base host."""
+"""Shared odometry-closed-loop base motion helpers for the isolated base host."""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import subprocess
 
 
 BASE_HOST = "tmr-user@172.16.0.50"
-REMOTE_MOVER = "/home/tmr-user/tmr_cycle/scripts/guarded_lateral_step.py"
+LOCAL_MOVER = Path(__file__).resolve().with_name("guarded_lateral_step.py")
 BASE_ENV = (
     "source /opt/ros/humble/setup.bash >/dev/null 2>&1; "
     "source /home/tmr-user/ros2_ws/install/setup.bash >/dev/null 2>&1 || true; "
@@ -15,6 +16,53 @@ BASE_ENV = (
     "RMW_IMPLEMENTATION=rmw_cyclonedds_cpp "
     "CYCLONEDDS_URI=file:///home/tmr-user/cyclonedds.xml"
 )
+
+
+def _remote_mover_command(arguments: str) -> tuple[list[str], str]:
+    """Stream the Task 2 mover to the base; never modify or invoke Task 3 code."""
+    command = (
+        f"{BASE_ENV}; timeout --signal=INT --kill-after=3 180 "
+        f"python3 - {arguments} --disable-collision-guard"
+    )
+    return (
+        [
+            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+            "-o", "ServerAliveInterval=2", "-o", "ServerAliveCountMax=3",
+            BASE_HOST, command,
+        ],
+        LOCAL_MOVER.read_text(encoding="utf-8"),
+    )
+
+
+def _run_remote_mover(arguments: str, *, timeout_s: float | None = None):
+    command, source = _remote_mover_command(arguments)
+    return subprocess.run(
+        command,
+        input=source,
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=timeout_s,
+    )
+
+
+def _extract_last_json_object(output: str) -> dict:
+    decoder = json.JSONDecoder()
+    best: tuple[int, int, dict] | None = None
+    for index, character in enumerate(output):
+        if character != "{":
+            continue
+        try:
+            value, consumed = decoder.raw_decode(output[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            candidate = (index + consumed, -index, value)
+            if best is None or candidate[:2] > best[:2]:
+                best = candidate
+    if best is None:
+        raise RuntimeError("base mover returned no JSON result")
+    return best[2]
 
 
 def split_lateral_move(distance_m: float, maximum_step_m: float = 0.08) -> list[float]:
@@ -41,28 +89,20 @@ def split_lateral_move(distance_m: float, maximum_step_m: float = 0.08) -> list[
 def guarded_move_right(
     distance_m: float, *, speed_mps: float = 0.02, timeout_s: float = 15.0
 ) -> dict:
-    """Execute one remote step; the remote process enforces odometry and two LiDARs."""
+    """Execute one remote step with odometry feedback and collision guard disabled."""
     if not 0.008 <= abs(distance_m) <= 0.08:
         raise ValueError("absolute step distance must be in [0.008, 0.08] m")
-    command = (
-        f"{BASE_ENV}; python3 {REMOTE_MOVER} --right-m {distance_m:.6f} "
-        f"--speed-mps {speed_mps:.4f} --timeout-s {timeout_s:.1f}"
-    )
-    completed = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", BASE_HOST, command],
-        check=False,
-        text=True,
-        capture_output=True,
+    completed = _run_remote_mover(
+        f"--right-m {distance_m:.6f} --speed-mps {speed_mps:.4f} "
+        f"--timeout-s {timeout_s:.1f}",
+        timeout_s=timeout_s + 20.0,
     )
     if completed.returncode != 0:
         raise RuntimeError(
             f"guarded base step failed: {completed.stdout.strip()} "
             f"{completed.stderr.strip()}"
         )
-    start = completed.stdout.find("{")
-    if start < 0:
-        raise RuntimeError("guarded base step returned no JSON result")
-    result = json.loads(completed.stdout[start:])
+    result = _extract_last_json_object(completed.stdout)
     if result.get("status") != "success":
         raise RuntimeError(f"guarded base step did not succeed: {result}")
     return result
@@ -71,29 +111,20 @@ def guarded_move_right(
 def guarded_move_right_continuous(
     distance_m: float, *, speed_mps: float = 0.04, timeout_s: float = 80.0
 ) -> dict:
-    """Execute one uninterrupted long lateral move with live odom/LiDAR guards."""
+    """Execute one uninterrupted long lateral move with live odometry feedback."""
     if not 0.008 <= abs(distance_m) <= 2.0:
         raise ValueError("absolute continuous distance must be in [0.008, 2.0] m")
-    command = (
-        f"{BASE_ENV}; python3 {REMOTE_MOVER} --right-m {distance_m:.6f} "
-        f"--speed-mps {speed_mps:.4f} --timeout-s {timeout_s:.1f}"
-    )
-    completed = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", BASE_HOST, command],
-        check=False,
-        text=True,
-        capture_output=True,
-        timeout=timeout_s + 20.0,
+    completed = _run_remote_mover(
+        f"--right-m {distance_m:.6f} --speed-mps {speed_mps:.4f} "
+        f"--timeout-s {timeout_s:.1f}",
+        timeout_s=timeout_s + 20.0,
     )
     if completed.returncode != 0:
         raise RuntimeError(
             f"continuous guarded base move failed: {completed.stdout.strip()} "
             f"{completed.stderr.strip()}"
         )
-    start = completed.stdout.find("{")
-    if start < 0:
-        raise RuntimeError("continuous guarded base move returned no JSON result")
-    result = json.loads(completed.stdout[start:])
+    result = _extract_last_json_object(completed.stdout)
     if result.get("status") != "success":
         raise RuntimeError(f"continuous guarded base move did not succeed: {result}")
     return result
@@ -102,28 +133,20 @@ def guarded_move_right_continuous(
 def guarded_move_forward(
     distance_m: float, *, speed_mps: float = 0.02, timeout_s: float = 15.0
 ) -> dict:
-    """Execute one signed fore/aft step with odometry and dual-LiDAR guards."""
+    """Execute one signed fore/aft step with odometry feedback."""
     if not 0.008 <= abs(distance_m) <= 0.08:
         raise ValueError("absolute step distance must be in [0.008, 0.08] m")
-    command = (
-        f"{BASE_ENV}; python3 {REMOTE_MOVER} --forward-m {distance_m:.6f} "
-        f"--speed-mps {speed_mps:.4f} --timeout-s {timeout_s:.1f}"
-    )
-    completed = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", BASE_HOST, command],
-        check=False,
-        text=True,
-        capture_output=True,
+    completed = _run_remote_mover(
+        f"--forward-m {distance_m:.6f} --speed-mps {speed_mps:.4f} "
+        f"--timeout-s {timeout_s:.1f}",
+        timeout_s=timeout_s + 20.0,
     )
     if completed.returncode != 0:
         raise RuntimeError(
             f"guarded fore/aft step failed: {completed.stdout.strip()} "
             f"{completed.stderr.strip()}"
         )
-    start = completed.stdout.find("{")
-    if start < 0:
-        raise RuntimeError("guarded fore/aft step returned no JSON result")
-    result = json.loads(completed.stdout[start:])
+    result = _extract_last_json_object(completed.stdout)
     if result.get("status") != "success":
         raise RuntimeError(f"guarded fore/aft step did not succeed: {result}")
     return result

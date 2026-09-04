@@ -84,7 +84,7 @@ def main() -> int:
             "thermal_pad_fk_ik",
             90.0,
         )
-        record["ordered_stages"].append("fk_ik_collision_validation_complete")
+        record["ordered_stages"].append("fk_ik_validation_complete")
         record["status"] = "complete"
         return_code = 0
     except Exception as exc:

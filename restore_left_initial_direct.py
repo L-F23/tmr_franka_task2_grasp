@@ -70,8 +70,16 @@ class DirectRestore(Node):
         if wrapped is None:
             handle.cancel_goal_async()
             raise RuntimeError("left initial PTP timeout")
-        # The action server can report ABORTED after reaching the endpoint; the
-        # measured joints remain the authoritative safety check.
+        if wrapped.status != GoalStatus.STATUS_SUCCEEDED:
+            raise RuntimeError(
+                f"left initial PTP did not succeed (action_status={wrapped.status})"
+            )
+        target_status = int(wrapped.result.target_status.status)
+        if target_status != wrapped.result.target_status.TARGET_REACHED:
+            raise RuntimeError(
+                "left initial PTP target was not reached: "
+                f"target_status={target_status}, error={wrapped.result.error_message}"
+            )
         self.wait_state(timeout=5.0)
         error = max(abs(a - b) for a, b in zip(self.q, TARGET))
         if error > 0.012:

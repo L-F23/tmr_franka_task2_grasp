@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -14,12 +13,19 @@ import sys
 import time
 from urllib.request import ProxyHandler, build_opener
 
+from mission_runtime import (
+    LOCK_FILE,
+    MissionAlreadyRunning,
+    acquire_motion_lock,
+    atomic_write_json,
+    release_motion_lock,
+)
+
 
 ROOT = Path(__file__).resolve().parent
 REFERENCE_ROOT = Path("/home/aup/tmr-mobile-manipulation")
 ROS_ENV = Path("/home/aup/tmr_env.sh")
 READY_RECORD = ROOT / "runtime" / "latest_quick_start.json"
-LOCK_FILE = Path("/tmp/tmr_task2_quick_start.lock")
 VIEWER_URL = "http://127.0.0.1:18081/status.json"
 BASE_HOST = "tmr-user@172.16.0.50"
 DIRECT_OPENER = build_opener(ProxyHandler({}))
@@ -30,8 +36,7 @@ REQUIRED_SERVICES = {
     "/left/controller_manager/set_hardware_component_state",
     "/left/controller_manager/switch_controller",
     "/left_ik/compute_fk",
-    "/left_ik/compute_cartesian_path",
-    "/left_ik/check_state_validity",
+    "/left_ik/compute_ik",
     "/franka_spine_node/get_position",
 }
 REQUIRED_ACTIONS = {
@@ -213,8 +218,7 @@ def prepare() -> dict:
         "right_arm_commanded": False,
         "results": results,
     }
-    READY_RECORD.parent.mkdir(parents=True, exist_ok=True)
-    READY_RECORD.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    atomic_write_json(READY_RECORD, record)
     return record
 
 
@@ -236,13 +240,9 @@ def main() -> int:
     parser.add_argument("--initial-right-m", type=float, default=2.0)
     args = parser.parse_args()
 
-    LOCK_FILE.touch(exist_ok=True)
-    with LOCK_FILE.open("r+") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print(json.dumps({"status": "blocked", "error": "another quick start is running"}))
-            return 73
+    lock = None
+    try:
+        lock = acquire_motion_lock()
         try:
             record = check_only() if args.check_only else prepare()
             print(json.dumps(record, indent=2), flush=True)
@@ -253,6 +253,7 @@ def main() -> int:
                     "/usr/bin/python3", "-u", str(ROOT / "run_full_thermal_pad_cycle.py"),
                     "--execute", "--initial-right-m", str(args.initial_right_m),
                     "--prepared-record", str(READY_RECORD),
+                    "--parent-lock-held",
                 ],
                 cwd=ROOT,
                 env=os.environ.copy(),
@@ -266,6 +267,11 @@ def main() -> int:
                 "physical_motion_commanded": False,
             }, indent=2), file=sys.stderr)
             return 2
+    except MissionAlreadyRunning as exc:
+        print(json.dumps({"status": "blocked", "error": str(exc)}), file=sys.stderr)
+        return 73
+    finally:
+        release_motion_lock(lock)
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ def offset_targets(
 
 
 def wait_motion_inputs(node: ThermalPadExecutor, timeout_s: float = 10.0) -> None:
-    for service in (node.fk_client, node.ik_client, node.validity_client, node.spine_client):
+    for service in node.planning_services():
         if not service.wait_for_service(timeout_sec=3.0):
             raise RuntimeError(f"service unavailable: {service.srv_name}")
     spine = node.call(node.spine_client, GetPosition.Request())
