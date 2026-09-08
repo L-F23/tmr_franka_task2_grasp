@@ -17,6 +17,9 @@ from colored_pad_detector import (
 from base_motion import split_lateral_move
 
 
+POLICY_ROOT = Path(__file__).resolve().parents[1] / "policy"
+
+
 def synthetic_layout():
     image = np.full((400, 800, 3), 235, np.uint8)
     colors = [(0, 0, 220), (0, 180, 0), (0, 180, 0), (0, 180, 0)]
@@ -43,8 +46,8 @@ def test_maps_sorted_visual_centers_to_known_distances():
 
 
 def test_saved_centers_form_low_residual_quadratic_distance_model():
-    calibration = json.loads(Path(
-        "config/red_pad_center_calibration.json"
+    calibration = json.loads((
+        POLICY_ROOT / "config/red_pad_center_calibration.json"
     ).read_text(encoding="utf-8"))
     model = fit_center_distance_model(calibration["anchors"], degree=2)
     assert model["rmse_cm"] < 0.10
@@ -60,8 +63,8 @@ def test_saved_centers_form_low_residual_quadratic_distance_model():
 
 
 def test_red_center_is_recognized_independently_and_evaluated_by_fit():
-    calibration = json.loads(Path(
-        "config/red_pad_center_calibration.json"
+    calibration = json.loads((
+        POLICY_ROOT / "config/red_pad_center_calibration.json"
     ).read_text(encoding="utf-8"))
     red = ColoredPad(
         color="red",

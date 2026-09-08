@@ -5,5 +5,5 @@
 __pycache__
 **/__pycache__
 *.py[cod]
-outputs
-runtime
+policy/outputs
+policy/runtime

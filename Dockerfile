@@ -35,7 +35,7 @@ RUN groupadd --gid "${POLICY_GID}" "${POLICY_USER}" \
 
 ENV DEBIAN_FRONTEND= \
     HOME=/home/aup \
-    POLICY_ROOT=/opt/tmr-task2 \
+    POLICY_ROOT=/opt/tmr-task2/policy \
     PYTHONDONTWRITEBYTECODE=1 \
     ROS_ENV_FILE=/home/aup/tmr_env.sh \
     ROS_HOME=/tmp/tmr-ros \
@@ -44,16 +44,16 @@ ENV DEBIAN_FRONTEND= \
     PYTHONUNBUFFERED=1 \
     TMR_TASK2_POLICY_REVISION=${POLICY_REVISION}
 
-WORKDIR /opt/tmr-task2
 COPY --chown=${POLICY_UID}:${POLICY_GID} . /opt/tmr-task2
 
 RUN chmod 0755 /opt/tmr-task2/docker/entrypoint.sh \
-    && mkdir -p /opt/tmr-task2/outputs /opt/tmr-task2/runtime \
+    && mkdir -p /opt/tmr-task2/policy/outputs /opt/tmr-task2/policy/runtime \
     && chown -R "${POLICY_UID}:${POLICY_GID}" \
-        /opt/tmr-task2/outputs /opt/tmr-task2/runtime \
+        /opt/tmr-task2/policy/outputs /opt/tmr-task2/policy/runtime \
     && /usr/bin/python3 -m compileall -q /opt/tmr-task2 \
     && /usr/bin/python3 -c "import cv2, numpy"
 
+WORKDIR /opt/tmr-task2/policy
 USER ${POLICY_UID}:${POLICY_GID}
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/tmr-task2/docker/entrypoint.sh"]

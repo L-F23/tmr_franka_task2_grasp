@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-readonly policy_root="${POLICY_ROOT:-/opt/tmr-task2}"
+readonly policy_root="${POLICY_ROOT:-/opt/tmr-task2/policy}"
 readonly ros_env_file="${ROS_ENV_FILE:-/home/aup/tmr_env.sh}"
 
 usage() {

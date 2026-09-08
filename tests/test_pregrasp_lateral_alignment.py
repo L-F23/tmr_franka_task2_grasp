@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import cv2
 
 from pregrasp_lateral_alignment import (
@@ -9,8 +11,11 @@ from pregrasp_lateral_alignment import (
 from alignment_detector import detect_occluded_grey_pad, detect_target
 
 
+POLICY_ROOT = Path(__file__).resolve().parents[1] / "policy"
 CONFIG = {
-    "wrist_reference_image": "captures/grasp_lateral_reference_20260904/aligned_left.jpg",
+    "wrist_reference_image": str(
+        POLICY_ROOT / "captures/grasp_lateral_reference_20260904/aligned_left.jpg"
+    ),
     "wrist_template_bbox_xywh": [300, 220, 145, 195],
 }
 
@@ -28,7 +33,9 @@ def test_legacy_reference_is_rejected_as_a_structured_target():
 
 
 def test_main_reference_guides_from_red_pad_displacement():
-    image = cv2.imread("captures/grasp_lateral_reference_20260904/aligned_main.jpg")
+    image = cv2.imread(str(
+        POLICY_ROOT / "captures/grasp_lateral_reference_20260904/aligned_main.jpg"
+    ))
     # Shift the reference value left of the measured red center: the current
     # red pad is to the right, so the base must move right.
     result = main_guidance(image, 700.0, 20.0)
@@ -38,7 +45,9 @@ def test_main_reference_guides_from_red_pad_displacement():
 def test_measured_mapping_has_verified_wrist_y_direction():
     import json
 
-    mapping = json.load(open("config/wrist_lateral_mapping.json"))
+    mapping = json.loads(
+        (POLICY_ROOT / "config/wrist_lateral_mapping.json").read_text()
+    )
     assert mapped_correction_m(-20.0, mapping) > 0.0
     assert mapped_correction_m(20.0, mapping) < 0.0
 
@@ -46,8 +55,10 @@ def test_measured_mapping_has_verified_wrist_y_direction():
 def test_measured_mapping_reference_is_aligned():
     import json
 
-    mapping = json.load(open("config/wrist_lateral_mapping.json"))
-    image = cv2.imread(mapping["reference_image"])
+    mapping = json.loads(
+        (POLICY_ROOT / "config/wrist_lateral_mapping.json").read_text()
+    )
+    image = cv2.imread(str(POLICY_ROOT / mapping["reference_image"]))
     result = mapped_wrist_state(image, mapping, 6.0)
     assert result["decision"] == "aligned"
     assert result["target_center_y_error_px"] == 0.0
@@ -57,8 +68,10 @@ def test_visible_target_outside_calibrated_range_keeps_wrist_direction():
     import json
     import numpy as np
 
-    mapping = json.load(open("config/wrist_lateral_mapping.json"))
-    reference = cv2.imread(mapping["reference_image"])
+    mapping = json.loads(
+        (POLICY_ROOT / "config/wrist_lateral_mapping.json").read_text()
+    )
+    reference = cv2.imread(str(POLICY_ROOT / mapping["reference_image"]))
     shifted = np.full_like(reference, 190)
     x, y, width, height = mapping["reference_bbox_xywh"]
     shifted[y + 80:y + 80 + height, x:x + width] = reference[y:y + height, x:x + width]

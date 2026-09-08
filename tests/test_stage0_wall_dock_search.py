@@ -19,6 +19,9 @@ from stage0_wall_docking_base import (
 )
 
 
+POLICY_ROOT = Path(__file__).resolve().parents[1] / "policy"
+
+
 def synthetic_wall(clearance_m=0.22, angle_deg=0.0):
     generator = np.random.default_rng(7)
     y = np.linspace(-1.0, 1.0, 180)
@@ -82,7 +85,7 @@ def test_black_stand_detector_requires_dark_object_on_bright_table():
 
 
 def test_black_stand_detector_rejects_recorded_robot_foreground():
-    sample = cv2.imread("captures/20260903_222646_zed.jpg")
+    sample = cv2.imread(str(POLICY_ROOT / "captures/20260903_222646_zed.jpg"))
     assert sample is not None
     assert detect_black_stand(sample) is None
 
@@ -132,7 +135,7 @@ def test_execute_stops_for_distance_confirmation_before_right_search(
         "stage0_wall_dock_and_find_stand.guarded_move_right",
         forbidden_right_motion,
     )
-    config = load_config(Path("config/wall_dock_search.json"))
+    config = load_config(POLICY_ROOT / "config/wall_dock_search.json")
     record = tmp_path / "record.json"
     assert execute(config, record) == 0
     saved = json.loads(record.read_text(encoding="utf-8"))

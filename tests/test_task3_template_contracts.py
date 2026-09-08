@@ -7,7 +7,7 @@ import run_from_pregrasp_to_finish
 from mission_runtime import LOCK_FILE, atomic_write_json
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1] / "policy"
 
 
 def test_all_motion_entrypoints_share_one_task_lock():

@@ -6,7 +6,7 @@ import pytest
 from restore_right_parking_direct import parking_parameters
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1] / "policy"
 
 
 def test_recorded_right_parking_pose_is_enabled_and_complete():

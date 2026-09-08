@@ -1,8 +1,8 @@
 __pycache__/
 .pytest_cache/
 .venv/
-outputs/
-runtime/
+policy/outputs/
+policy/runtime/
 *.pyc
 api.py
-config/latest_*.json
+policy/config/latest_*.json

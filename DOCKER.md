@@ -1,8 +1,8 @@
 # Docker deployment
 
-The repository did not previously contain a container definition. The image
-added here packages the Task 2 Python policy, OpenCV/NumPy, ROS 2 Jazzy command
-line tools and standard messages, CycloneDDS, SSH, curl, and screen.
+The image packages the Task 2 Python policy, OpenCV/NumPy, ROS 2 Jazzy command
+line tools and standard messages, CycloneDDS, SSH, curl, and screen. Runtime
+code, configuration, and calibration captures are grouped under `policy/`.
 
 The deployed testbed's custom `franka_msgs`/`franka_spine_msgs` overlays and
 DDS configuration remain the source of truth. At runtime, `/home/aup` is
@@ -41,7 +41,7 @@ git checkout --detach "$POLICY_COMMIT"
 test "$(git rev-parse HEAD)" = "$POLICY_COMMIT"
 test -z "$(git status --porcelain)"
 
-mkdir -p outputs runtime
+mkdir -p policy/outputs policy/runtime
 touch /tmp/tmr_task2_motion.lock
 
 docker build --pull \
@@ -62,9 +62,9 @@ docker run --rm \
   --mount type=bind,src=/home/aup,dst=/home/aup,readonly \
   --mount type=bind,src=/run/screen,dst=/run/screen \
   --mount type=bind,src=/tmp/tmr_task2_motion.lock,dst=/tmp/tmr_task2_motion.lock \
-  --mount type=bind,src="$POLICY_CHECKOUT/config",dst=/opt/tmr-task2/config \
-  --mount type=bind,src="$POLICY_CHECKOUT/outputs",dst=/opt/tmr-task2/outputs \
-  --mount type=bind,src="$POLICY_CHECKOUT/runtime",dst=/opt/tmr-task2/runtime \
+  --mount type=bind,src="$POLICY_CHECKOUT/policy/config",dst=/opt/tmr-task2/policy/config \
+  --mount type=bind,src="$POLICY_CHECKOUT/policy/outputs",dst=/opt/tmr-task2/policy/outputs \
+  --mount type=bind,src="$POLICY_CHECKOUT/policy/runtime",dst=/opt/tmr-task2/policy/runtime \
   "$POLICY_IMAGE" preflight
 ```
 
@@ -77,9 +77,9 @@ docker run --rm \
   --mount type=bind,src=/home/aup,dst=/home/aup,readonly \
   --mount type=bind,src=/run/screen,dst=/run/screen \
   --mount type=bind,src=/tmp/tmr_task2_motion.lock,dst=/tmp/tmr_task2_motion.lock \
-  --mount type=bind,src="$POLICY_CHECKOUT/config",dst=/opt/tmr-task2/config \
-  --mount type=bind,src="$POLICY_CHECKOUT/outputs",dst=/opt/tmr-task2/outputs \
-  --mount type=bind,src="$POLICY_CHECKOUT/runtime",dst=/opt/tmr-task2/runtime \
+  --mount type=bind,src="$POLICY_CHECKOUT/policy/config",dst=/opt/tmr-task2/policy/config \
+  --mount type=bind,src="$POLICY_CHECKOUT/policy/outputs",dst=/opt/tmr-task2/policy/outputs \
+  --mount type=bind,src="$POLICY_CHECKOUT/policy/runtime",dst=/opt/tmr-task2/policy/runtime \
   "$POLICY_IMAGE" check
 ```
 
@@ -95,9 +95,9 @@ docker run --rm --interactive --tty \
   --mount type=bind,src=/home/aup,dst=/home/aup,readonly \
   --mount type=bind,src=/run/screen,dst=/run/screen \
   --mount type=bind,src=/tmp/tmr_task2_motion.lock,dst=/tmp/tmr_task2_motion.lock \
-  --mount type=bind,src="$POLICY_CHECKOUT/config",dst=/opt/tmr-task2/config \
-  --mount type=bind,src="$POLICY_CHECKOUT/outputs",dst=/opt/tmr-task2/outputs \
-  --mount type=bind,src="$POLICY_CHECKOUT/runtime",dst=/opt/tmr-task2/runtime \
+  --mount type=bind,src="$POLICY_CHECKOUT/policy/config",dst=/opt/tmr-task2/policy/config \
+  --mount type=bind,src="$POLICY_CHECKOUT/policy/outputs",dst=/opt/tmr-task2/policy/outputs \
+  --mount type=bind,src="$POLICY_CHECKOUT/policy/runtime",dst=/opt/tmr-task2/policy/runtime \
   "$POLICY_IMAGE" execute
 ```
 
@@ -107,9 +107,10 @@ The image entrypoint is:
 /usr/bin/tini -- /opt/tmr-task2/docker/entrypoint.sh
 ```
 
-`docker/entrypoint.sh` sources `/opt/ros/jazzy/setup.bash` and the mounted
-`/home/aup/tmr_env.sh`, validates every required custom message import, and then
-launches `/usr/bin/python3 -u quick_start.py --execute` for `execute` mode.
+`docker/entrypoint.sh` changes to `/opt/tmr-task2/policy`, sources
+`/opt/ros/jazzy/setup.bash` and the mounted `/home/aup/tmr_env.sh`, validates
+every required custom message import, and then launches
+`/usr/bin/python3 -u quick_start.py --execute` for `execute` mode.
 
 No `--privileged` flag or device mount is required. The real-time FCI and base
 controller processes remain on their respective robot hosts; this container is
