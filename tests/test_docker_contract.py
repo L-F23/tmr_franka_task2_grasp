@@ -57,7 +57,7 @@ class DockerContractTests(unittest.TestCase):
         guide = (ROOT / "DOCKER.md").read_text(encoding="utf-8")
         self.assertNotIn("__PINNED_COMMIT__", guide)
         self.assertIn(
-            "POLICY_COMMIT='010efaec68a8d5310a7516c7163fbca967971626'",
+            "POLICY_COMMIT='7017c8b02e68fe654c9c34dd0d2bff4557747e0b'",
             guide,
         )
         self.assertEqual(guide.count(
