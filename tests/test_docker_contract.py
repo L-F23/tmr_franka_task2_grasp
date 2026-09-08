@@ -40,6 +40,11 @@ class DockerContractTests(unittest.TestCase):
 
     def test_operator_commands_share_host_lock_and_screen_session(self):
         guide = (ROOT / "DOCKER.md").read_text(encoding="utf-8")
+        self.assertNotIn("__PINNED_COMMIT__", guide)
+        self.assertIn(
+            "POLICY_COMMIT='010efaec68a8d5310a7516c7163fbca967971626'",
+            guide,
+        )
         self.assertEqual(guide.count(
             "src=/tmp/tmr_task2_motion.lock,dst=/tmp/tmr_task2_motion.lock"
         ), 3)

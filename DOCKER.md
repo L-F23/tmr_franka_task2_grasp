@@ -24,7 +24,7 @@ checkout of the pinned policy commit.
 set -euo pipefail
 
 export POLICY_REPOSITORY='https://github.com/L-F23/tmr_franka_task2_grasp.git'
-export POLICY_COMMIT='__PINNED_COMMIT__'
+export POLICY_COMMIT='010efaec68a8d5310a7516c7163fbca967971626'
 export POLICY_IMAGE="tmr-task2-policy:${POLICY_COMMIT}"
 export POLICY_CHECKOUT="$HOME/tmr-task2-policy-${POLICY_COMMIT}"
 
