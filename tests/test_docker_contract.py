@@ -15,6 +15,8 @@ class DockerContractTests(unittest.TestCase):
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("policy/                 Python policy", readme)
+        self.assertIn("## Docker quick start", readme)
+        self.assertIn("[Docker deployment](DOCKER.md#operator-commands)", readme)
         self.assertNotIn(
             "cd /home/aup/tmr_franka_task2_grasp &&",
             readme,

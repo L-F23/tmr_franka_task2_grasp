@@ -34,6 +34,25 @@ All Python policy commands below are run from the checkout's `policy/`
 directory. Paths such as `config/...`, `captures/...`, and `outputs/...` are
 relative to that directory. Run the test suite from the repository root.
 
+## Docker quick start
+
+Run the Docker workflow on robot host `.100` as user `aup`. Use the complete,
+copy-ready commands in [Docker deployment](DOCKER.md#operator-commands); that
+document pins the policy commit and includes every required host mount.
+
+1. Run the operator checkout and `docker build` block.
+2. Run `preflight` to validate the image and mounted ROS environment without
+   contacting the robot graph or sending motion.
+3. Run `check` for read-only ROS graph and camera health checks.
+4. Only after confirming the initial pose, gripper state, clear workspace, and
+   reachable emergency stop, run `execute` to allow physical motion.
+
+The image defaults to `check` when no mode is supplied. Its entrypoint is
+`/usr/bin/tini -- /opt/tmr-task2/docker/entrypoint.sh`, and the entrypoint runs
+the policy from `/opt/tmr-task2/policy`. Do not omit the bind mounts documented
+in `DOCKER.md`; they provide the testbed ROS overlays, SSH configuration,
+single-instance lock, writable configuration, outputs, and runtime state.
+
 ## One-line command
 
 ```bash
