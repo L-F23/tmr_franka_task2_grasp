@@ -4,6 +4,14 @@ Detect red strip-shaped labels on a tabletop from live JPEG images captured by t
 
 The production entry point first opens the left gripper, sets the Spine to `0.600 m`, restores the right arm to its recorded raised and retracted parking pose, then resets the left arm and verifies the error state of both arms. Initialization does not command the right gripper; startup aborts if any step fails.
 
+## Demo
+
+[![TMR Franka Task 2 demo](docs/assets/task2-demo-preview.webp)](docs/assets/task2-demo.mp4)
+
+Click the accelerated preview above to open the complete 5-minute 14-second,
+silent demonstration, or use the direct
+[full demo video](docs/assets/task2-demo.mp4) link.
+
 ## Installation
 
 ```bash
