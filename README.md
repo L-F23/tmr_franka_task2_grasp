@@ -1,10 +1,10 @@
 # TMR Franka Task 2 — Red Strip Detection
 
-从移动操作机器人主摄 ZED-M 的实时 JPEG 中检测桌面红色条状标签。
+Detect red strip-shaped labels on a tabletop from live JPEG images captured by the mobile manipulator's main ZED-M camera.
 
-正式入口会先松开左夹爪、将 Spine 调到 `0.600 m`，把右臂恢复到已记录的抬高后缩停车位，再复位左臂并验证双臂误差。初始化不命令右夹爪；任一步失败都会中止启动。
+The production entry point first opens the left gripper, sets the Spine to `0.600 m`, restores the right arm to its recorded raised and retracted parking pose, then resets the left arm and verifies the error state of both arms. Initialization does not command the right gripper; startup aborts if any step fails.
 
-## 安装
+## Installation
 
 ```bash
 python3 -m venv .venv
@@ -12,152 +12,152 @@ python3 -m venv .venv
 pip install -r requirements.txt
 ```
 
-机器人本机通常已经安装 NumPy 和 OpenCV，也可以直接使用 `/usr/bin/python3`。
+NumPy and OpenCV are normally already installed on the robot host, so `/usr/bin/python3` can also be used directly.
 
-## 一行命令
+## One-line command
 
 ```bash
 cd /home/aup/tmr_franka_task2_grasp && /usr/bin/python3 start_project.py --annotated-output outputs/red_strip.jpg
 ```
 
-初始化目标位于 `config/initial_pose.json`，每次成功启动的实测结果写入并覆盖仓库跟踪文件 `config/latest_initial_state.json`。正式运行必须使用 `start_project.py`；`detect_red_strip.py` 仅保留用于不控制机器人的离线调试。每次初始态或项目代码更新经确认后都应提交并推送到远端仓库。
+The initialization target is stored in `config/initial_pose.json`. After every successful startup, the measured state is written to and overwrites the repository-tracked file `config/latest_initial_state.json`. Production runs must use `start_project.py`; `detect_red_strip.py` is retained only for offline debugging without robot control. After a new initial state or project code update has been verified, the changes should be committed and pushed to the remote repository.
 
-默认读取：
+The default input is:
 
 ```text
 http://172.16.0.50:18082/tmr_zed_latest.jpg
 ```
 
-输出 JSON 包含：目标中心像素坐标、归一化坐标、四角坐标、长轴方向、像素长度/宽度、面积和置信度。退出码为 `0` 表示检测成功，`2` 表示没有找到目标，`3` 表示相机画面没有更新。
+The output JSON contains the target center in pixel and normalized coordinates, the four corner coordinates, major-axis direction, pixel length and width, area, and confidence. Exit code `0` means detection succeeded, `2` means no target was found, and `3` means the camera image did not update.
 
-离线图片：
+For an offline image:
 
 ```bash
 /usr/bin/python3 detect_red_strip.py --image frame.jpg --all --annotated-output outputs/result.jpg
 ```
 
-桌面区域可按现场视角调整：
+The tabletop region can be adjusted for the on-site camera view:
 
 ```bash
 /usr/bin/python3 detect_red_strip.py --roi-top 0.40 --roi-bottom 0.95
 ```
 
-## 测试
+## Testing
 
 ```bash
 /usr/bin/python3 -m pytest -q
 ```
 
-检测采用 HSV 红色双区间、形态学去噪和旋转矩形几何约束，能处理红色色相在 HSV 0/179 边界两侧的情况。HTTP 输入会检查 `Last-Modified`，不会把重复下载的旧 JPEG 当作新帧。
+Detection uses two HSV red ranges, morphological denoising, and rotated-rectangle geometry constraints. It handles red hues on both sides of the HSV 0/179 boundary. HTTP input checks `Last-Modified` so that a repeatedly downloaded stale JPEG is not treated as a new frame.
 
-## 黑色底座与灰色导热垫横向对准
+## Lateral alignment of the black base and gray thermal pad
 
-只观察并输出决策：
+Observe and report a decision only:
 
 ```bash
 /usr/bin/python3 align_to_thermal_pad.py
 ```
 
-允许实际横移：
+Allow actual lateral motion:
 
 ```bash
 /usr/bin/python3 align_to_thermal_pad.py --execute
 ```
 
-程序优先使用左腕画面闭环居中；初始姿态的现场标定为腕部图像上/下分别对应机器人左/右，因此目标在画面上方时左移、在下方时右移。腕部未见目标时用主摄水平位置提供搜索方向。每步横移默认仅 `0.02 m`。当前 Task 2 按现场要求关闭双雷达碰撞门，只使用新鲜里程计、静止状态、控制租约、命令订阅者和超时进行运动约束；每次退出仍连续发送零速。
+The program prioritizes closed-loop centering with the left wrist camera. On-site calibration at the initial pose maps the top and bottom of the wrist image to the robot's left and right, respectively. The base therefore moves left when the target is above the image center and right when it is below. If the wrist camera cannot see the target, the target's horizontal position in the main camera provides the search direction. Each lateral step is limited to `0.02 m` by default. As required for the current Task 2 setup, the dual-LiDAR collision gate is disabled; motion constraints use only fresh odometry, a stationary-state check, the control lease, command subscribers, and timeouts. Zero velocity is still sent repeatedly whenever the program exits.
 
-底盘运动通过 SSH 在 `tmr-user@172.16.0.50` 本机执行，固定使用与底盘控制器一致的隔离 ROS Domain 97；机械臂不接收运动命令。
+Base motion is executed over SSH on `tmr-user@172.16.0.50`, using the isolated ROS Domain 97 that matches the base controller. No motion commands are sent to either arm.
 
-## 导热垫末端抓取 FK/IK
+## Thermal-pad terminal-grasp FK/IK
 
-按固定顺序执行“左臂初始位复位 → 底盘视觉居中 → 连续静止确认 → D405 原始深度配准 → 手眼坐标变换 → FK/IK”：
+Run the following sequence in a fixed order: reset the left arm to its initial pose → visually center the base → continuously confirm that the base is stationary → register raw D405 depth → apply the hand-eye transform → solve FK/IK.
 
 ```bash
 cd /home/aup/tmr_franka_task2_grasp && source /home/aup/tmr_env.sh && /usr/bin/python3 run_thermal_pad_pipeline.py --execute
 ```
 
-流程的最后阶段仅解算和校验，不闭合夹爪、不执行抓取轨迹；结果写入 `config/latest_thermal_pad_ik.json`，标注图写入 `outputs/thermal_pad_ik.jpg`。`config/thermal_pad_pick.json` 中的 `kinematics.avoid_collisions` 当前固定为 `false`，因此不会调用 MoveIt 场景碰撞门。
+The final stage only solves and validates the motion. It does not close the gripper or execute a grasp trajectory. Results are written to `config/latest_thermal_pad_ik.json`, and the annotated image is written to `outputs/thermal_pad_ik.jpg`. `kinematics.avoid_collisions` in `config/thermal_pad_pick.json` is currently fixed to `false`, so the MoveIt planning-scene collision gate is not invoked.
 
-`thermal_pad_ik.py` 会同时要求：导热垫中心落在左腕图像 Y 方向 ±35 px、底盘速度连续 1 秒低于阈值、左臂处于记录的初始关节位、RGB/深度时间差不超过 0.1 秒、7 帧深度中至少 5 帧在三维空间一致、手眼标定与 FK 一致、所有 IK 点连续且关节步长受限。任一条件不满足即以零动作退出。靠近机器人且向下搭的一端按当前初始姿态标定为导热垫长轴的图像 `+X` 端，参数集中在 `config/thermal_pad_pick.json`。
+`thermal_pad_ik.py` simultaneously requires all of the following: the thermal-pad center must be within ±35 px along the Y axis of the left wrist image; base velocity must remain below the threshold for one continuous second; the left arm must be at the recorded initial joint pose; the RGB/depth timestamp difference must not exceed 0.1 seconds; at least five of seven depth frames must agree in 3D; hand-eye calibration must agree with FK; and all IK points must be continuous with bounded joint steps. If any condition is not satisfied, the program exits without motion. At the current initial pose, the end of the pad that is closer to the robot and hangs downward is calibrated as the image `+X` end of the thermal pad's major axis. Parameters are centralized in `config/thermal_pad_pick.json`.
 
-入口在复位前会以 `--state-only` 运行 `bootstrap_left_runtime.py`：确认左臂硬件、错误恢复和两路状态广播可用，然后由原生低速 PTP 动作复位。正式入口不会启用阻抗控制器，避免 FCI 重连后控制器读到空目标或过期目标。
+Before resetting the arm, the entry point runs `bootstrap_left_runtime.py` with `--state-only`. This verifies that the left-arm hardware, error recovery, and both state broadcasters are available, after which a native low-speed PTP motion performs the reset. The production entry point does not enable the impedance controller, preventing the controller from reading an empty or stale target after an FCI reconnection.
 
-FK/IK 请求会读取 Spine 实测高度（当前为 `0.600 m`），并显式组合“整机基座 → 左臂安装座 → FCI 实测末端”的坐标链；禁止把 FCI 的左臂局部位姿直接与 MoveIt 整机坐标比较。实测末端相对 `link8` 的法兰偏移保存在 `config/thermal_pad_pick.json`。
+FK/IK requests read the measured Spine height, currently `0.600 m`, and explicitly compose the coordinate chain from the whole-robot base through the left-arm mount to the measured FCI end effector. The FCI pose in the left arm's local frame must never be compared directly with the MoveIt whole-robot frame. The measured flange offset from `link8` to the end effector is stored in `config/thermal_pad_pick.json`.
 
-### 导热垫抓取、提起与脱离动作设计
+### Thermal-pad grasp, lift, and disengagement motion design
 
-FK/IK 规划器还会生成完整但默认禁止实机执行的动作序列：在检测到的夹取末端高度，把夹爪伸出/指尖朝向轴保持为地面 `+X`，把两指开合轴保持为地面 `+Z`；因此夹爪整体水平且两个指一上一下。夹爪张开后沿 `+X` 前进到目标并闭合；以该姿态沿 `+Z` 上提 `0.12 m`，沿 `+X` 向远端移动 `0.12 m`；第一段到此保持。第二段经独立授权后先沿 `-Z` 下降 `0.22 m`，再保持同一水平姿态沿 `-Z/-X` 斜向下降和内缩。斜向移动完全结束后先松开夹爪，随后才把夹爪朝向轴从 `+X` 向地面 `-Z` 小角度旋转，并同时沿 `-X` 继续内缩，形成“倒铲斗”脱离动作。旋转和位置使用同步插值，每个中间点均请求 IK 并检查状态有效性。
+The FK/IK planner also generates a complete motion sequence whose execution on the physical robot is disabled by default. At the detected grasp-endpoint height, the gripper's extension/fingertip axis is aligned with ground-frame `+X`, while the finger opening/closing axis is aligned with ground-frame `+Z`. The gripper is therefore horizontal, with one finger above the other. After opening, the gripper advances along `+X` to the target and closes. It then lifts `0.12 m` along `+Z` and moves `0.12 m` toward the far side along `+X`; the first segment ends and holds at this pose. After separate authorization, the second segment first descends `0.22 m` along `-Z`, then moves diagonally down and inward along `-Z/-X` while maintaining the same horizontal orientation. Only after the diagonal motion has fully completed does the gripper open. The fingertip axis then rotates by a small angle from `+X` toward ground-frame `-Z` while continuing to retract along `-X`, producing an inverted-scoop disengagement motion. Orientation and position use synchronized interpolation; every intermediate point requests IK and is checked for a valid state.
 
-坐标和参数位于 `config/thermal_pad_pick.json` 的 `motion_sequence`。所有方向和高度先在与地面平行的整机 `base` 参考系中表达；FCI 返回的肩部局部末端位姿必须通过“整机根 → Spine → 左臂安装座”变换后才能使用，严禁直接在 `left_fr3v2_link0` 肩部坐标中加减这些位移。这里的“与此前夹取末端同高”使用变换后的地面参考 Z；第一段上提 `0.12 m`、远移 `0.12 m` 和第二段下降 `0.22 m` 都是地面轴上的相对位移，因此不依赖地面参考系原点具体落在哪里。
+Coordinates and parameters are defined under `motion_sequence` in `config/thermal_pad_pick.json`. All directions and heights are expressed first in the whole-robot `base` frame, which is parallel to the ground. The shoulder-local end-effector pose returned by FCI must be transformed through whole-robot root → Spine → left-arm mount before these displacements are applied. These offsets must never be added directly in the shoulder frame `left_fr3v2_link0`. Here, “the same height as the previous grasp endpoint” uses the transformed ground-reference Z coordinate. The first segment's `0.12 m` lift and `0.12 m` far-side move, and the second segment's `0.22 m` descent, are relative displacements along ground-frame axes and therefore do not depend on the exact location of the ground-frame origin.
 
-用户明确指定的第一段上提/远移 `0.12/0.12 m` 和第二段下降 `0.22 m` 已固定；开放前进距离、斜向下降/内缩距离以及倒铲斗角度尚无现场尺寸依据，目前仅为保守设计初值，并标记 `parameters_calibrated: false`。当前倒铲斗角度暂定 `15°`：它改变的是夹爪朝向，从水平向下俯转，不是向 `+X` 做位置修正。在完成 TCP、桌面 PlanningScene、夹持视觉验证和小步现场标定前，任何执行器都必须拒绝运行该放置/脱离序列。
+The user-specified `0.12/0.12 m` lift/far-side transfer in the first segment and the `0.22 m` descent in the second segment are fixed. The open-loop forward distance, diagonal descent/retraction distance, and inverted-scoop angle still lack on-site dimensional evidence; they are conservative initial design values and are marked `parameters_calibrated: false`. The current provisional inverted-scoop angle is `15°`: it changes the gripper orientation by pitching it downward from horizontal, rather than applying a positional correction along `+X`. Until TCP calibration, the tabletop PlanningScene, grasp visual verification, and small-step on-site calibration have all been completed, every actuator must refuse to execute this placement/disengagement sequence.
 
-完整动作按第 6 步结束位置拆成两个独立段。第一段 `pick_lift_and_far_transfer` 完成夹取、上提 `0.12 m` 和向远端移动 `0.12 m`，在 `carry_far_12cm` 保持姿态并退出；第二段 `lower_place_and_release` 只有在重新确认第一段终点、物体仍被可靠夹持并获得单独授权后，才从下降 `0.22 m` 开始。禁止第一段完成后自动串行进入第二段。
+The complete motion is split at the end of step 6 into two independently authorized segments. The first segment, `pick_lift_and_far_transfer`, performs the grasp, lifts `0.12 m`, and moves `0.12 m` toward the far side, then exits while holding the `carry_far_12cm` pose. The second segment, `lower_place_and_release`, may begin with the `0.22 m` descent only after the first segment's endpoint has been reconfirmed, the object is verified to remain securely grasped, and separate authorization has been granted. The second segment must never start automatically after the first segment completes.
 
-## 2 m 底盘接近与导热片完整流程
+## 2 m base approach and complete thermal-pad workflow
 
-### 快速启动（实机服务已正常）
+### Quick start when physical-robot services are healthy
 
-推荐从机器人主机 `.100` 使用统一入口。默认只准备运行环境，不移动底盘、机械臂或夹爪：
+Use the unified entry point from robot host `.100`. By default, it only prepares the runtime environment and does not move the base, either arm, or either gripper:
 
 ```bash
 cd /home/aup/tmr_franka_task2_grasp && source /home/aup/tmr_env.sh && /usr/bin/python3 -u quick_start.py
 ```
 
-只做只读检查：
+Run read-only checks only:
 
 ```bash
 /usr/bin/python3 -u quick_start.py --check-only
 ```
 
-确认机器人处于本任务指定起点、夹爪状态正确、现场无人且急停可触达后，一行启动完整流程：
+After confirming that the robot is at the task's specified starting pose, the grippers are in the correct state, the work area is clear, and the emergency stop is within reach, launch the full workflow with one command:
 
 ```bash
 cd /home/aup/tmr_franka_task2_grasp && source /home/aup/tmr_env.sh && /usr/bin/python3 -u quick_start.py --execute
 ```
 
-快速入口与所有其他运动入口共用同一把单实例锁，先检查核心 ROS 服务；随后并行恢复左臂的“仅状态”运行态和底盘隔离运行栈，最后要求主摄与左腕帧序号持续递增。健康服务会直接复用，不会重启；只允许重启无硬件所有权的三相机 HTTP 桥。左臂仅在硬件不是 `active` 或状态流异常时执行一次有界恢复，顺序固定为“停活动控制器 → ErrorRecovery → 激活硬件 → 激活状态广播器”。若 FR3、Robotiq、Spine、D405 或 IK 等核心驱动缺失，入口不会猜测或启动第二实例，而是阻塞并要求先运行参考项目的冷启动助手：
+The quick-start entry point and every other motion entry point share the same single-instance lock. It first checks the core ROS services, then restores the left arm's state-only runtime and the isolated base stack in parallel, and finally requires the frame sequence numbers from the main camera and left wrist camera to continue increasing. Healthy services are reused rather than restarted; only the three camera HTTP bridges, which do not own hardware, may be restarted. Bounded left-arm recovery runs only if the hardware is not `active` or the state stream is abnormal, in the fixed order: stop active controllers → ErrorRecovery → activate hardware → activate state broadcasters. If core drivers such as FR3, Robotiq, Spine, D405, or IK are missing, the entry point does not guess or start a second instance. Instead, it blocks and requires the cold-start helper from the reference project to be run first:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\grasp\scripts\start_tmr_system.ps1
 ```
 
-`--execute` 会把刚生成、有效期仅 20 秒且明确标记“未发送运动”的准备记录交给完整流程，避免重复初始化；此后每个底盘短步仍重新检查里程计、双雷达和控制租约。FCI 实时环始终留在机器人本机，底盘 Humble Domain 97 与机械臂 Jazzy Domain 0 不做高频 DDS 混接。
+With `--execute`, the quick-start entry point passes a newly generated preparation record—valid for only 20 seconds and explicitly marked “no motion sent”—to the full workflow, avoiding duplicate initialization. Every short base step still rechecks odometry, both LiDARs, and the control lease. The FCI real-time loop always remains on the robot host; the base's Humble Domain 97 and the arm's Jazzy Domain 0 do not exchange high-frequency DDS traffic.
 
-完整流程入口为：
+The complete workflow entry point is:
 
 ```bash
 cd /home/aup/tmr_franka_task2_grasp && source /home/aup/tmr_env.sh && /usr/bin/python3 -u run_full_thermal_pad_cycle.py --execute
 ```
 
-若底盘已经位于黑色底座抓取参考点、左臂也已经处于标定的抓取预备位，可跳过服务启动、2 m 运输、黑底座搜索、桌边校准和进入预备位的动作，从预备位一行运行到释放后复位：
+If the base is already at the black-base grasp reference point and the left arm is already at the calibrated pre-grasp pose, service startup, the initial 2 m transport, the coarse black-base search, table-edge calibration, and motion into the pre-grasp pose can be skipped. Run the workflow from pre-grasp through post-release reset with one command:
 
 ```bash
 cd /home/aup/tmr_franka_task2_grasp && source /home/aup/tmr_env.sh && /usr/bin/python3 -u run_from_pregrasp_to_finish.py --execute
 ```
 
-该入口不会自动启动或重启任何机器人服务。它先只读检查核心 ROS 服务与三路实时画面，将 Spine 恢复到 `0.6 m`，把右臂恢复到已记录的抬高后缩停车位，再用实测关节与 FK 核对左臂预抓取位。随后 `black_base_pose_alignment.py` 用左腕中三个互相重叠的黑底座结构模板做多尺度一致性匹配：尺度修正底盘前后位置，图像 Y 残差修正底盘左右位置；几乎侧视、只呈现为薄边的灰色导热片不参与模板匹配。校准通过后才允许力反馈靠近、回缩和闭爪。
+This entry point does not automatically start or restart any robot service. It first performs read-only checks of the core ROS services and all three live camera feeds, restores the Spine to `0.6 m`, restores the right arm to the recorded raised and retracted parking pose, and then checks the left-arm pre-grasp pose against measured joints and FK. Next, `black_base_pose_alignment.py` performs multi-scale consistency matching against three mutually overlapping black-base structural templates in the left wrist image. Scale corrects the base's forward/backward position, while the image Y residual corrects its lateral position. The gray thermal pad, which is viewed almost edge-on and appears only as a thin edge, is not used in template matching. Force-feedback approach, retraction, and gripper closure are allowed only after calibration passes.
 
-抓取前探以 `2 mm` 为步长，最大 `16.2 cm`。只有 Franka 原生接触标志，或沿前探轴至少 `2.5 N` 的力增量连续 5 帧成立，才会停止并回缩 `18 mm`；笛卡尔力矩与关节力矩只作为诊断信息，不能单独触发闭爪。闭爪前还会核对校准在本次靠近开始时有效、靠近期间底盘未被命令、当前关节仍处于记录的回缩位。之后依次垂直上提 `12 cm`、主摄识别红垫并用总里程闭环加末端残差补偿横移、前伸 `14.3 cm` 并下降 `12 cm`、完成后退倾转释放、垂直脱离并恢复左臂初始位。
+The pre-grasp approach uses `2 mm` steps over a maximum distance of `16.2 cm`. It stops and retracts `18 mm` only if either Franka's native contact flag is set or a force increase of at least `2.5 N` along the approach axis persists for five consecutive frames. Cartesian torque and joint torque are diagnostic only and must never independently trigger gripper closure. Before closing the gripper, the workflow also verifies that calibration was valid when this approach began, the base was not commanded during the approach, and the current joints remain at the recorded retracted pose. It then lifts vertically by `12 cm`; detects the red pad with the main camera and performs lateral translation using total-odometry closed-loop control plus an end-effector residual correction; extends by `14.3 cm` and descends by `12 cm`; performs the backward-tilt release; disengages vertically; and restores the left arm to its initial pose.
 
-若当前正处于“顺时针动作完成、等待逆时针恢复”的检查点，可从逆时针恢复开始一行执行后续全部流程：
+If the robot is currently at the checkpoint “clockwise motion complete, awaiting counterclockwise recovery,” run all remaining stages beginning with counterclockwise recovery using one command:
 
 ```bash
 cd /home/aup/tmr_franka_task2_grasp && source /home/aup/tmr_env.sh && /usr/bin/python3 -u run_from_ccw_restore_to_finish.py --execute
 ```
 
-该入口先恢复 Spine `0.6 m`、右臂停车位并验证左臂预抓取位；随后执行逆时针 `90°`、后退 `55 cm`、右移 `1.40 m`、继续向右搜索黑底座（最多额外 `1.50 m`）、恢复已标定的后墙角度/距离、复核预抓取位、运行上述黑底座多尺度校准，再接抓取、红垫定位、放置和左臂复位。运行日志分别写入 `config/latest_ccw_restore_to_finish.json` 和 `config/latest_ccw_route_grasp_finish.json`。
+This entry point first restores the Spine to `0.6 m` and the right arm to its parking pose, then verifies the left-arm pre-grasp pose. It subsequently performs a counterclockwise `90°` rotation, moves backward `55 cm`, moves right `1.40 m`, continues searching to the right for the black base by up to an additional `1.50 m`, restores the calibrated rear-wall angle and distance, rechecks the pre-grasp pose, runs the multi-scale black-base calibration described above, and continues through grasping, red-pad localization, placement, and left-arm reset. Runtime logs are written to `config/latest_ccw_restore_to_finish.json` and `config/latest_ccw_route_grasp_finish.json`.
 
-Task 2 的标准初始位置定义为左臂复位位姿。若从该标准初始位置开始，使用下面的主入口；它在健康检查后先复位左臂，立即将左臂送到抓取预备位并用关节数据与 FK 复核，然后接续上述抓取、运输、放置和最终复位流程：
+The standard Task 2 initial position is defined by the left arm's reset pose. When starting from this standard initial position, use the primary entry point below. After the health check, it first resets the left arm, immediately moves the left arm to the pre-grasp pose, verifies the pose using joint data and FK, and then continues with the grasp, transport, placement, and final reset workflow described above:
 
 ```bash
 cd /home/aup/tmr_franka_task2_grasp && source /home/aup/tmr_env.sh && /usr/bin/python3 -u run_task2_from_initial.py --execute
 ```
 
-这个入口同样不会启动机器人服务，也不会执行 2 m 初始底盘运输、黑底座粗搜索或桌边校准。底盘必须已经位于黑底座抓取参考位置；它同样强制运行黑底座多尺度校准和闭爪前二次门控；不带 `--execute` 时只输出动作顺序。
+This entry point likewise does not start robot services or perform the initial 2 m base transport, coarse black-base search, or table-edge calibration. The base must already be at the black-base grasp reference position. It still enforces multi-scale black-base calibration and the second gate immediately before gripper closure. Without `--execute`, it only prints the motion sequence.
 
-完整入口先将 Spine 恢复到 `0.6 m`，把右臂恢复到停车位，再把左臂恢复到运输安全初始位，并通过底盘主机的 `19_ensure_navigation_stack.sh` 恢复隔离任务栈。底盘用一条连续里程计闭环轨迹向右移动 `2.0 m`，中途不分段停走；之后执行黑底座粗搜索、进入预抓取位、多尺度精校准、严格力反馈靠近和后续运输放置。Task 2 的底盘运动器通过 SSH 在 `.50` 本机运行，不读取或覆盖 task3 文件。
+The complete entry point first restores the Spine to `0.6 m`, restores the right arm to its parking pose, then restores the left arm to its transport-safe initial pose. It uses `19_ensure_navigation_stack.sh` on the base host to restore the isolated task stack. The base moves right by `2.0 m` in one continuous odometry closed-loop trajectory without intermediate segmented stops. It then performs the coarse black-base search, enters the pre-grasp pose, runs fine multi-scale calibration, performs the strict force-feedback approach, and continues with transport and placement. The Task 2 base motion worker runs over SSH on `.50` and does not read or overwrite any Task 3 files.
 
-task3 仓库只作为行为模板和底层冷启动服务来源，不由本项目写入。借鉴的契约包括：任务级互斥锁、ROS Domain 隔离、运动阶段原子检查点、严格动作结果验证和异常后的零速退出。
+The Task 3 repository is used only as a behavioral template and a source for low-level cold-start services; this project never writes to it. Reused contracts include the task-level mutual-exclusion lock, ROS Domain isolation, atomic motion-stage checkpoints, strict action-result verification, and zero-velocity exit after an exception.
 
-最终释放使用 `stage5_release_diagonal.py`：先下降 `1.5 cm`，再在后退 `10 cm` 时按前快后慢的 ease-out 曲线继续下降并逐渐下倾 `20°`；随后执行已标定的左向 `1.2 cm` 末端修正、额外下倾与向内跟随。夹爪保持闭合到最终垂直脱离阶段开始时才张开，然后上升 `5 cm` 并恢复左臂初始位。流程记录写入 `config/latest_full_thermal_pad_cycle.json`；不带 `--execute` 时只输出计划，不发送运动命令。
+Final release is performed by `stage5_release_diagonal.py`. It first descends by `1.5 cm`, then continues descending and gradually pitches downward by `20°` while retracting `10 cm` along an ease-out curve that starts fast and finishes slowly. It subsequently applies the calibrated `1.2 cm` leftward end-effector correction, an additional downward pitch, and inward follow-through. The gripper remains closed until the final vertical disengagement begins; only then does it open, rise by `5 cm`, and restore the left arm to its initial pose. The workflow record is written to `config/latest_full_thermal_pad_cycle.json`. Without `--execute`, the program only prints the plan and sends no motion command.
