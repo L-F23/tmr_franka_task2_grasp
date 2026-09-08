@@ -14,6 +14,9 @@ pip install -r requirements.txt
 
 NumPy and OpenCV are normally already installed on the robot host, so `/usr/bin/python3` can also be used directly.
 
+For a pinned, operator-ready ROS 2 Docker image and the exact build, preflight,
+health-check, and launch commands, see [Docker deployment](DOCKER.md).
+
 ## One-line command
 
 ```bash
