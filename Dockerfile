@@ -31,9 +31,21 @@ RUN apt-get update \
         tini \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd --gid "${POLICY_GID}" "${POLICY_USER}" \
-    && useradd --uid "${POLICY_UID}" --gid "${POLICY_GID}" \
-        --create-home --shell /bin/bash "${POLICY_USER}"
+RUN existing_group="$(getent group "${POLICY_GID}" | cut -d: -f1 || true)" \
+    && if [ -z "${existing_group}" ]; then \
+         groupadd --gid "${POLICY_GID}" "${POLICY_USER}"; \
+       elif [ "${existing_group}" != "${POLICY_USER}" ]; then \
+         groupmod --new-name "${POLICY_USER}" "${existing_group}"; \
+       fi \
+    && existing_user="$(getent passwd "${POLICY_UID}" | cut -d: -f1 || true)" \
+    && if [ -z "${existing_user}" ]; then \
+         useradd --uid "${POLICY_UID}" --gid "${POLICY_GID}" \
+           --create-home --shell /bin/bash "${POLICY_USER}"; \
+       elif [ "${existing_user}" != "${POLICY_USER}" ]; then \
+         usermod --login "${POLICY_USER}" "${existing_user}"; \
+         usermod --home "/home/${POLICY_USER}" --move-home \
+           --gid "${POLICY_GID}" --shell /bin/bash "${POLICY_USER}"; \
+       fi
 
 ENV DEBIAN_FRONTEND= \
     HOME=/home/aup \
