@@ -2,14 +2,14 @@
 set -eo pipefail
 
 readonly policy_root="${POLICY_ROOT:-/opt/tmr-task2/policy}"
-readonly ros_env_file="${ROS_ENV_FILE:-/home/aup/tmr_env.sh}"
+readonly interface_overlay="/opt/tmr-interfaces/install/setup.bash"
 
 usage() {
   cat <<'EOF'
 Usage: docker run [docker options] IMAGE MODE [arguments]
 
 Modes:
-  preflight          Validate the mounted testbed environment; send no motion.
+  preflight          Validate the self-contained image; send no motion.
   check              Run the read-only ROS and camera health checks.
   prepare            Prepare healthy services; do not launch the motion policy.
   execute            Launch the complete Task 2 policy with physical motion.
@@ -35,19 +35,13 @@ fi
 
 [[ -d "${policy_root}" ]] || fail "policy root is missing: ${policy_root}"
 [[ -r /opt/ros/jazzy/setup.bash ]] || fail "ROS 2 Jazzy is missing from the image"
-[[ -r "${ros_env_file}" ]] || fail \
-  "mount the testbed /home/aup directory read-only; missing ${ros_env_file}"
-[[ -d /home/aup/tmr-mobile-manipulation ]] || fail \
-  "missing testbed reference project: /home/aup/tmr-mobile-manipulation"
-[[ -d /home/aup/.ssh ]] || fail "missing testbed SSH configuration: /home/aup/.ssh"
+[[ -r "${interface_overlay}" ]] || fail \
+  "bundled Franka interface overlay is missing: ${interface_overlay}"
 
 # shellcheck disable=SC1091
 source /opt/ros/jazzy/setup.bash
-# The testbed file loads the custom Franka and Spine message overlays and sets
-# the deployed CycloneDDS configuration. The host directory is mounted at the
-# same absolute path so every prefix recorded by the setup files remains valid.
 # shellcheck disable=SC1090
-source "${ros_env_file}"
+source "${interface_overlay}"
 
 export PYTHONPATH="/usr/lib/python3/dist-packages:${PYTHONPATH:-}"
 export ROS_HOME="${ROS_HOME:-/tmp/tmr-ros}"
@@ -56,7 +50,7 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/tmr-cache}"
 mkdir -p "${ROS_HOME}" "${ROS_LOG_DIR}" "${XDG_CACHE_HOME}"
 cd "${policy_root}"
 
-for command in curl ros2 screen ssh; do
+for command in curl ros2; do
   command -v "${command}" >/dev/null 2>&1 || fail "required command not found: ${command}"
 done
 
@@ -64,6 +58,7 @@ done
 import cv2
 import numpy
 import rclpy
+from cv_bridge import CvBridge
 from control_msgs.action import GripperCommand
 from controller_manager_msgs.srv import ListControllers, SwitchController
 from franka_msgs.action import ErrorRecovery, PTPMotion
@@ -71,7 +66,30 @@ from franka_msgs.msg import FrankaRobotState
 from franka_spine_msgs.srv import GetPosition
 from moveit_msgs.srv import GetMotionPlan, GetPositionFK, GetPositionIK, GetStateValidity
 from realsense2_camera_msgs.msg import Extrinsics
+from sensor_msgs.msg import CompressedImage, Image
 PY
+
+start_camera_viewer() {
+  if curl --noproxy '*' --silent --fail --max-time 1 \
+      http://127.0.0.1:18081/status.json >/dev/null 2>&1; then
+    return
+  fi
+  /usr/bin/python3 -u camera_viewer.py --port 18081 \
+    >/tmp/tmr_task2_camera_viewer.log 2>&1 &
+  readonly viewer_pid=$!
+  for _ in $(seq 1 40); do
+    if curl --noproxy '*' --silent --fail --max-time 1 \
+        http://127.0.0.1:18081/status.json >/dev/null 2>&1; then
+      echo "Bundled camera viewer started (pid ${viewer_pid})." >&2
+      return
+    fi
+    if ! kill -0 "${viewer_pid}" 2>/dev/null; then
+      fail "camera viewer exited; see /tmp/tmr_task2_camera_viewer.log"
+    fi
+    sleep 0.25
+  done
+  fail "camera viewer did not become ready; see /tmp/tmr_task2_camera_viewer.log"
+}
 
 mode="${1:-check}"
 if [[ $# -gt 0 ]]; then
@@ -85,12 +103,15 @@ case "${mode}" in
     echo "Container preflight passed; no motion command was sent."
     ;;
   check)
+    start_camera_viewer
     exec /usr/bin/python3 -u quick_start.py --check-only "$@"
     ;;
   prepare)
+    start_camera_viewer
     exec /usr/bin/python3 -u quick_start.py "$@"
     ;;
   execute)
+    start_camera_viewer
     exec /usr/bin/python3 -u quick_start.py --execute "$@"
     ;;
   start-project)

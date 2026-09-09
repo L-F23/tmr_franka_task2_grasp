@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import time
 import cv2
 
-from base_motion import BASE_HOST, guarded_move_right
+from base_motion import guarded_move_right
 from alignment_detector import (
     Target,
     detect_main_hint,
@@ -20,13 +19,6 @@ from alignment_detector import (
 )
 
 VIEWER = "http://127.0.0.1:18081"
-BASE_ENV = (
-    "source /opt/ros/humble/setup.bash; source ~/ros2_ws/install/setup.bash; "
-    "export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp "
-    "CYCLONEDDS_URI=file:///home/tmr-user/cyclonedds.xml"
-)
-
-
 def frame(name: str):
     capture = cv2.VideoCapture(f"{VIEWER}/{name}.mjpg")
     ok, image = capture.read()
@@ -48,14 +40,9 @@ def main_table_target(image) -> Target | None:
 
 
 def move_right(distance_m: float, allow_odom_only: bool = False) -> None:
-    if allow_odom_only:
-        command = (
-            f"{BASE_ENV}; cd ~/tmr_cycle; python3 scripts/12_translate_right_odom_only.py "
-            f"--distance-m {distance_m:.5f} "
-            "--speed-mps 0.025 --timeout-s 8"
-        )
-        subprocess.run(["ssh", BASE_HOST, command], check=True)
-        return
+    # The bundled mover is already odometry closed-loop.  Keep the legacy flag
+    # as a CLI-compatible alias without depending on a remote Task 3 script.
+    _ = allow_odom_only
     guarded_move_right(distance_m, speed_mps=0.025, timeout_s=15.0)
 
 

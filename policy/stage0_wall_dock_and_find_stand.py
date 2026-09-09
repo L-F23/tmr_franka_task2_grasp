@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 from urllib.request import ProxyHandler, build_opener
 
@@ -22,8 +23,7 @@ import numpy as np
 
 from alignment_detector import detect_target
 from base_motion import (
-    BASE_ENV,
-    BASE_HOST,
+    base_process_environment,
     _extract_last_json_object,
     guarded_move_right,
 )
@@ -156,23 +156,14 @@ def fresh_main_frame(
 
 
 def run_base_controller(arguments: list[str], timeout_s: float) -> dict:
-    source = BASE_CONTROLLER.read_text(encoding="utf-8")
-    remote = (
-        f"{BASE_ENV}; timeout --signal=INT --kill-after=3 {timeout_s + 5:.1f} "
-        "python3 - " + " ".join(arguments)
-    )
     completed = subprocess.run(
-        [
-            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-            "-o", "ServerAliveInterval=2", "-o", "ServerAliveCountMax=3",
-            BASE_HOST, remote,
-        ],
-        input=source,
+        [sys.executable, "-u", str(BASE_CONTROLLER), *arguments],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         timeout=timeout_s + 20.0,
         check=False,
+        env=base_process_environment(),
     )
     if completed.returncode:
         raise RuntimeError(

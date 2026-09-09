@@ -15,13 +15,20 @@ def test_all_motion_entrypoints_share_one_task_lock():
     assert run_from_pregrasp_to_finish.LOCK_FILE == LOCK_FILE
 
 
-def test_base_mover_is_task2_source_stream_with_collision_guard_disabled():
-    command, source = base_motion._remote_mover_command("--right-m 0.020")
+def test_base_mover_is_bundled_local_process_with_collision_guard_disabled():
+    command = base_motion._mover_command("--right-m 0.020")
     joined = " ".join(command)
-    assert "python3 - --right-m 0.020 --disable-collision-guard" in joined
-    assert "timeout --signal=INT --kill-after=3" in joined
+    assert "guarded_lateral_step.py --right-m 0.020 --disable-collision-guard" in joined
     assert "tmr-mobile-manipulation" not in joined
-    assert "class GuardedLateralStep" in source
+    assert "ssh" not in joined
+
+
+def test_base_runtime_defaults_to_network_visible_domain_zero(monkeypatch):
+    monkeypatch.delenv("TMR_BASE_ROS_DOMAIN_ID", raising=False)
+    monkeypatch.delenv("TMR_BASE_ROS_LOCALHOST_ONLY", raising=False)
+    environment = base_motion.base_process_environment()
+    assert environment["ROS_DOMAIN_ID"] == "0"
+    assert environment["ROS_LOCALHOST_ONLY"] == "0"
 
 
 def test_arm_collision_gate_is_explicitly_disabled():

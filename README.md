@@ -41,15 +41,20 @@ DOCKER.md               Pinned operator build and launch procedure
 All Python policy commands below are run from the checkout's `policy/`
 directory. Paths such as `config/...`, `captures/...`, and `outputs/...` are
 relative to that directory. Run the test suite from the repository root.
+The bare Python examples are for a native shell in which ROS 2 and the Franka
+interfaces have already been sourced. Evaluators should use the self-contained
+Docker workflow below; it supplies those interfaces without any host setup
+file.
 
 ## Docker quick start
 
 Run the Docker workflow on robot host `.100` as user `aup`. Use the complete,
 copy-ready commands in [Docker deployment](DOCKER.md#operator-commands); that
-document pins the policy commit and includes every required host mount.
+document starts from the submitted pinned commit and requires no host project,
+setup file, SSH credentials, or screen session.
 
 1. Run the operator checkout and `docker build` block.
-2. Run `preflight` to validate the image and mounted ROS environment without
+2. Run `preflight` to validate the image and bundled ROS environment without
    contacting the robot graph or sending motion.
 3. Run `check` for read-only ROS graph and camera health checks.
 4. Only after confirming the initial pose, gripper state, clear workspace, and
@@ -57,14 +62,16 @@ document pins the policy commit and includes every required host mount.
 
 The image defaults to `check` when no mode is supplied. Its entrypoint is
 `/usr/bin/tini -- /opt/tmr-task2/docker/entrypoint.sh`, and the entrypoint runs
-the policy from `/opt/tmr-task2/policy`. Do not omit the bind mounts documented
-in `DOCKER.md`; they provide the testbed ROS overlays, SSH configuration,
-single-instance lock, writable configuration, outputs, and runtime state.
+the policy from `/opt/tmr-task2/policy`. The image builds the pinned Franka and
+Spine ROS interfaces and includes its CycloneDDS configuration and camera
+bridge. It does not mount or require `/home/aup/tmr_env.sh`,
+`/home/aup/tmr-mobile-manipulation`, `/home/aup/.ssh`, or `/run/screen`.
+Writable configuration, outputs, and runtime records use Docker volumes.
 
 ## One-line command
 
 ```bash
-cd /home/aup/tmr_franka_task2_grasp/policy && /usr/bin/python3 start_project.py --annotated-output outputs/red_strip.jpg
+cd tmr_franka_task2_grasp/policy && /usr/bin/python3 start_project.py --annotated-output outputs/red_strip.jpg
 ```
 
 The initialization target is stored in `config/initial_pose.json`. After every successful startup, the measured state is written to and overwrites the repository-tracked file `config/latest_initial_state.json`. Production runs must use `start_project.py`; `detect_red_strip.py` is retained only for offline debugging without robot control. After a new initial state or project code update has been verified, the changes should be committed and pushed to the remote repository.
@@ -114,14 +121,14 @@ Allow actual lateral motion:
 
 The program prioritizes closed-loop centering with the left wrist camera. On-site calibration at the initial pose maps the top and bottom of the wrist image to the robot's left and right, respectively. The base therefore moves left when the target is above the image center and right when it is below. If the wrist camera cannot see the target, the target's horizontal position in the main camera provides the search direction. Each lateral step is limited to `0.02 m` by default. As required for the current Task 2 setup, the dual-LiDAR collision gate is disabled; motion constraints use only fresh odometry, a stationary-state check, the control lease, command subscribers, and timeouts. Zero velocity is still sent repeatedly whenever the program exits.
 
-Base motion is executed over SSH on `tmr-user@172.16.0.50`, using the isolated ROS Domain 97 that matches the base controller. No motion commands are sent to either arm.
+Base motion runs from the host-network container and communicates with the deployed controller through the testbed CycloneDDS graph. No SSH authentication or remote repository script is used, and no base command is sent to either arm.
 
 ## Thermal-pad terminal-grasp FK/IK
 
 Run the following sequence in a fixed order: reset the left arm to its initial pose → visually center the base → continuously confirm that the base is stationary → register raw D405 depth → apply the hand-eye transform → solve FK/IK.
 
 ```bash
-cd /home/aup/tmr_franka_task2_grasp/policy && source /home/aup/tmr_env.sh && /usr/bin/python3 run_thermal_pad_pipeline.py --execute
+cd tmr_franka_task2_grasp/policy && /usr/bin/python3 run_thermal_pad_pipeline.py --execute
 ```
 
 The final stage only solves and validates the motion. It does not close the gripper or execute a grasp trajectory. Results are written to `config/latest_thermal_pad_ik.json`, and the annotated image is written to `outputs/thermal_pad_ik.jpg`. `kinematics.avoid_collisions` in `config/thermal_pad_pick.json` is currently fixed to `false`, so the MoveIt planning-scene collision gate is not invoked.
@@ -149,7 +156,7 @@ The complete motion is split at the end of step 6 into two independently authori
 Use the unified entry point from robot host `.100`. By default, it only prepares the runtime environment and does not move the base, either arm, or either gripper:
 
 ```bash
-cd /home/aup/tmr_franka_task2_grasp/policy && source /home/aup/tmr_env.sh && /usr/bin/python3 -u quick_start.py
+cd tmr_franka_task2_grasp/policy && /usr/bin/python3 -u quick_start.py
 ```
 
 Run read-only checks only:
@@ -161,27 +168,23 @@ Run read-only checks only:
 After confirming that the robot is at the task's specified starting pose, the grippers are in the correct state, the work area is clear, and the emergency stop is within reach, launch the full workflow with one command:
 
 ```bash
-cd /home/aup/tmr_franka_task2_grasp/policy && source /home/aup/tmr_env.sh && /usr/bin/python3 -u quick_start.py --execute
+cd tmr_franka_task2_grasp/policy && /usr/bin/python3 -u quick_start.py --execute
 ```
 
-The quick-start entry point and every other motion entry point share the same single-instance lock. It first checks the core ROS services, then restores the left arm's state-only runtime and the isolated base stack in parallel, and finally requires the frame sequence numbers from the main camera and left wrist camera to continue increasing. Healthy services are reused rather than restarted; only the three camera HTTP bridges, which do not own hardware, may be restarted. Bounded left-arm recovery runs only if the hardware is not `active` or the state stream is abnormal, in the fixed order: stop active controllers → ErrorRecovery → activate hardware → activate state broadcasters. If core drivers such as FR3, Robotiq, Spine, D405, or IK are missing, the entry point does not guess or start a second instance. Instead, it blocks and requires the cold-start helper from the reference project to be run first:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\grasp\scripts\start_tmr_system.ps1
-```
+The quick-start entry point and every other motion entry point share the same single-instance lock. It first checks the core ROS services, then restores the left arm's state-only runtime and checks the isolated base stack in parallel, and finally requires the frame sequence numbers from the main camera and left wrist camera to continue increasing. Healthy services are reused rather than restarted; the container starts its own ROS-to-HTTP camera bridge, which does not own camera hardware. Bounded left-arm recovery runs only if the hardware is not `active` or the state stream is abnormal, in the fixed order: stop active controllers → ErrorRecovery → activate hardware → activate state broadcasters. If core drivers such as FR3, Robotiq, Spine, D405, base odometry/velocity adapter, or IK are missing, the entry point does not guess or start a second instance. Instead, it fails before mission motion with the missing service, action, topic, or authentication requirement.
 
 With `--execute`, the quick-start entry point passes a newly generated preparation record—valid for only 20 seconds and explicitly marked “no motion sent”—to the full workflow, avoiding duplicate initialization. Every short base step still rechecks odometry, both LiDARs, and the control lease. The FCI real-time loop always remains on the robot host; the base's Humble Domain 97 and the arm's Jazzy Domain 0 do not exchange high-frequency DDS traffic.
 
 The complete workflow entry point is:
 
 ```bash
-cd /home/aup/tmr_franka_task2_grasp/policy && source /home/aup/tmr_env.sh && /usr/bin/python3 -u run_full_thermal_pad_cycle.py --execute
+cd tmr_franka_task2_grasp/policy && /usr/bin/python3 -u run_full_thermal_pad_cycle.py --execute
 ```
 
 If the base is already at the black-base grasp reference point and the left arm is already at the calibrated pre-grasp pose, service startup, the initial 2 m transport, the coarse black-base search, table-edge calibration, and motion into the pre-grasp pose can be skipped. Run the workflow from pre-grasp through post-release reset with one command:
 
 ```bash
-cd /home/aup/tmr_franka_task2_grasp/policy && source /home/aup/tmr_env.sh && /usr/bin/python3 -u run_from_pregrasp_to_finish.py --execute
+cd tmr_franka_task2_grasp/policy && /usr/bin/python3 -u run_from_pregrasp_to_finish.py --execute
 ```
 
 This entry point does not automatically start or restart any robot service. It first performs read-only checks of the core ROS services and all three live camera feeds, restores the Spine to `0.6 m`, restores the right arm to the recorded raised and retracted parking pose, and then checks the left-arm pre-grasp pose against measured joints and FK. Next, `black_base_pose_alignment.py` performs multi-scale consistency matching against three mutually overlapping black-base structural templates in the left wrist image. Scale corrects the base's forward/backward position, while the image Y residual corrects its lateral position. The gray thermal pad, which is viewed almost edge-on and appears only as a thin edge, is not used in template matching. Force-feedback approach, retraction, and gripper closure are allowed only after calibration passes.
@@ -191,7 +194,7 @@ The pre-grasp approach uses `2 mm` steps over a maximum distance of `16.2 cm`. I
 If the robot is currently at the checkpoint “clockwise motion complete, awaiting counterclockwise recovery,” run all remaining stages beginning with counterclockwise recovery using one command:
 
 ```bash
-cd /home/aup/tmr_franka_task2_grasp/policy && source /home/aup/tmr_env.sh && /usr/bin/python3 -u run_from_ccw_restore_to_finish.py --execute
+cd tmr_franka_task2_grasp/policy && /usr/bin/python3 -u run_from_ccw_restore_to_finish.py --execute
 ```
 
 This entry point first restores the Spine to `0.6 m` and the right arm to its parking pose, then verifies the left-arm pre-grasp pose. It subsequently performs a counterclockwise `90°` rotation, moves backward `55 cm`, moves right `1.40 m`, continues searching to the right for the black base by up to an additional `1.50 m`, restores the calibrated rear-wall angle and distance, rechecks the pre-grasp pose, runs the multi-scale black-base calibration described above, and continues through grasping, red-pad localization, placement, and left-arm reset. Runtime logs are written to `config/latest_ccw_restore_to_finish.json` and `config/latest_ccw_route_grasp_finish.json`.
@@ -199,13 +202,11 @@ This entry point first restores the Spine to `0.6 m` and the right arm to its pa
 The standard Task 2 initial position is defined by the left arm's reset pose. When starting from this standard initial position, use the primary entry point below. After the health check, it first resets the left arm, immediately moves the left arm to the pre-grasp pose, verifies the pose using joint data and FK, and then continues with the grasp, transport, placement, and final reset workflow described above:
 
 ```bash
-cd /home/aup/tmr_franka_task2_grasp/policy && source /home/aup/tmr_env.sh && /usr/bin/python3 -u run_task2_from_initial.py --execute
+cd tmr_franka_task2_grasp/policy && /usr/bin/python3 -u run_task2_from_initial.py --execute
 ```
 
 This entry point likewise does not start robot services or perform the initial 2 m base transport, coarse black-base search, or table-edge calibration. The base must already be at the black-base grasp reference position. It still enforces multi-scale black-base calibration and the second gate immediately before gripper closure. Without `--execute`, it only prints the motion sequence.
 
-The complete entry point first restores the Spine to `0.6 m`, restores the right arm to its parking pose, then restores the left arm to its transport-safe initial pose. It uses `19_ensure_navigation_stack.sh` on the base host to restore the isolated task stack. The base moves right by `2.0 m` in one continuous odometry closed-loop trajectory without intermediate segmented stops. It then performs the coarse black-base search, enters the pre-grasp pose, runs fine multi-scale calibration, performs the strict force-feedback approach, and continues with transport and placement. The Task 2 base motion worker runs over SSH on `.50` and does not read or overwrite any Task 3 files.
-
-The Task 3 repository is used only as a behavioral template and a source for low-level cold-start services; this project never writes to it. Reused contracts include the task-level mutual-exclusion lock, ROS Domain isolation, atomic motion-stage checkpoints, strict action-result verification, and zero-velocity exit after an exception.
+The complete entry point first restores the Spine to `0.6 m`, restores the right arm to its parking pose, then restores the left arm to its transport-safe initial pose. It checks that the standard base odometry and velocity-adapter topics are visible through CycloneDDS, then runs the bundled Task 2 motion worker locally in the container; it does not depend on authentication or a remote repository script. The base moves right by `2.0 m` in one continuous odometry closed-loop trajectory without intermediate segmented stops. It then performs the coarse black-base search, enters the pre-grasp pose, runs fine multi-scale calibration, performs the strict force-feedback approach, and continues with transport and placement. It does not read or overwrite any Task 3 files.
 
 Final release is performed by `stage5_release_diagonal.py`. It first descends by `1.5 cm`, then continues descending and gradually pitches downward by `20°` while retracting `10 cm` along an ease-out curve that starts fast and finishes slowly. It subsequently applies the calibrated `1.2 cm` leftward end-effector correction, an additional downward pitch, and inward follow-through. The gripper remains closed until the final vertical disengagement begins; only then does it open, rise by `5 cm`, and restore the left arm to its initial pose. The workflow record is written to `config/latest_full_thermal_pad_cycle.json`. Without `--execute`, the program only prints the plan and sends no motion command.

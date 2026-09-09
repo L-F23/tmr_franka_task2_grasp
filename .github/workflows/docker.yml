@@ -1,0 +1,23 @@
+name: Docker image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-preflight:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build policy image
+        run: |
+          docker build \
+            --build-arg POLICY_REVISION="$GITHUB_SHA" \
+            --tag tmr-task2-policy:test \
+            .
+      - name: Run self-contained preflight
+        run: docker run --rm tmr-task2-policy:test preflight

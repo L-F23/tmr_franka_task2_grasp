@@ -17,15 +17,17 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        openssh-client \
+        python3-colcon-common-extensions \
         python3-numpy \
         python3-opencv \
+        ros-jazzy-cv-bridge \
         ros-jazzy-control-msgs \
         ros-jazzy-controller-manager-msgs \
         ros-jazzy-moveit-msgs \
+        ros-jazzy-nav-msgs \
         ros-jazzy-realsense2-camera-msgs \
         ros-jazzy-rmw-cyclonedds-cpp \
-        screen \
+        ros-jazzy-rosidl-default-generators \
         tini \
     && rm -rf /var/lib/apt/lists/*
 
@@ -37,7 +39,10 @@ ENV DEBIAN_FRONTEND= \
     HOME=/home/aup \
     POLICY_ROOT=/opt/tmr-task2/policy \
     PYTHONDONTWRITEBYTECODE=1 \
-    ROS_ENV_FILE=/home/aup/tmr_env.sh \
+    ROS_DOMAIN_ID=0 \
+    ROS_LOCALHOST_ONLY=0 \
+    RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
+    CYCLONEDDS_URI=file:///opt/tmr-task2/docker/cyclonedds.xml \
     ROS_HOME=/tmp/tmr-ros \
     ROS_LOG_DIR=/tmp/tmr-ros/log \
     XDG_CACHE_HOME=/tmp/tmr-cache \
@@ -45,6 +50,19 @@ ENV DEBIAN_FRONTEND= \
     TMR_TASK2_POLICY_REVISION=${POLICY_REVISION}
 
 COPY --chown=${POLICY_UID}:${POLICY_GID} . /opt/tmr-task2
+
+# Build the exact Franka interface definitions used by the policy.  The
+# Apache-2.0 sources and their pinned upstream revision live in third_party/.
+RUN mkdir -p /opt/tmr-interfaces/src \
+    && cp -a /opt/tmr-task2/third_party/franka_ros2_interfaces/franka_msgs \
+        /opt/tmr-interfaces/src/ \
+    && cp -a /opt/tmr-task2/third_party/franka_ros2_interfaces/franka_spine_msgs \
+        /opt/tmr-interfaces/src/ \
+    && . /opt/ros/jazzy/setup.sh \
+    && cd /opt/tmr-interfaces \
+    && colcon build --merge-install --cmake-args -DBUILD_TESTING=OFF \
+    && rm -rf build log \
+    && chown -R "${POLICY_UID}:${POLICY_GID}" /opt/tmr-interfaces
 
 RUN chmod 0755 /opt/tmr-task2/docker/entrypoint.sh \
     && mkdir -p /opt/tmr-task2/policy/outputs /opt/tmr-task2/policy/runtime \

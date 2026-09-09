@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import ssl
 import subprocess
@@ -15,10 +16,9 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = ROOT / "config" / "initial_pose.json"
 DEFAULT_RECORD = ROOT / "config" / "latest_initial_state.json"
-ROS_ENV = Path("/home/aup/tmr_env.sh")
 RESTORE_LEFT = ROOT / "restore_left_initial_direct.py"
 RESTORE_RIGHT = ROOT / "restore_right_parking_direct.py"
-SPINE_API = "https://172.16.16.10/spine/api"
+SPINE_API = os.environ.get("TMR_SPINE_API", "https://172.16.16.10/spine/api")
 
 
 class InitializationError(RuntimeError):
@@ -27,7 +27,6 @@ class InitializationError(RuntimeError):
 
 def run_ros(command: str, timeout: float = 90.0) -> str:
     wrapped = (
-        f"source {ROS_ENV}; "
         "export PYTHONPATH=/usr/lib/python3/dist-packages:${PYTHONPATH:-}; "
         f"{command}"
     )

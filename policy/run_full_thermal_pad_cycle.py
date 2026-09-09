@@ -10,7 +10,7 @@ from pathlib import Path
 import subprocess
 import time
 
-from base_motion import guarded_move_right_continuous
+from base_motion import check_base_runtime, guarded_move_right_continuous
 from mission_runtime import (
     MissionAlreadyRunning,
     acquire_motion_lock,
@@ -160,14 +160,7 @@ def main() -> int:
         atomic_write_json(args.record, record)
 
         if args.prepared_record is None:
-            record["stage_results"].append(run(
-                [
-                    "ssh", "-o", "BatchMode=yes", "tmr-user@172.16.0.50",
-                    "bash /home/tmr-user/tmr_cycle/scripts/19_ensure_navigation_stack.sh",
-                ],
-                "ensure_isolated_base_runtime",
-                150.0,
-            ))
+            record["stage_results"].append(check_base_runtime())
         else:
             # The prepared record is consumed quickly and validated above;
             # the base mover still checks fresh odometry and the exclusive

@@ -1,48 +1,69 @@
-"""Shared odometry-closed-loop base motion helpers for the isolated base host."""
+"""Shared odometry-closed-loop motion helpers for the network-visible base."""
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import sys
 import subprocess
 
 
-BASE_HOST = "tmr-user@172.16.0.50"
 LOCAL_MOVER = Path(__file__).resolve().with_name("guarded_lateral_step.py")
-BASE_ENV = (
-    "source /opt/ros/humble/setup.bash >/dev/null 2>&1; "
-    "source /home/tmr-user/ros2_ws/install/setup.bash >/dev/null 2>&1 || true; "
-    "export ROS_DOMAIN_ID=97 ROS_LOCALHOST_ONLY=1 "
-    "RMW_IMPLEMENTATION=rmw_cyclonedds_cpp "
-    "CYCLONEDDS_URI=file:///home/tmr-user/cyclonedds.xml"
-)
 
 
-def _remote_mover_command(arguments: str) -> tuple[list[str], str]:
-    """Stream the Task 2 mover to the base; never modify or invoke Task 3 code."""
-    command = (
-        f"{BASE_ENV}; timeout --signal=INT --kill-after=3 180 "
-        f"python3 - {arguments} --disable-collision-guard"
+def base_process_environment() -> dict[str, str]:
+    """Use the container's ROS overlay while allowing testbed DDS overrides."""
+    environment = os.environ.copy()
+    environment["ROS_DOMAIN_ID"] = os.environ.get("TMR_BASE_ROS_DOMAIN_ID", "0")
+    environment["ROS_LOCALHOST_ONLY"] = os.environ.get(
+        "TMR_BASE_ROS_LOCALHOST_ONLY", "0"
     )
-    return (
-        [
-            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-            "-o", "ServerAliveInterval=2", "-o", "ServerAliveCountMax=3",
-            BASE_HOST, command,
-        ],
-        LOCAL_MOVER.read_text(encoding="utf-8"),
+    environment["RMW_IMPLEMENTATION"] = "rmw_cyclonedds_cpp"
+    return environment
+
+
+def check_base_runtime(timeout_s: float = 15.0) -> dict:
+    """Verify the deployed base topics over DDS without starting or moving anything."""
+    completed = subprocess.run(
+        ["ros2", "topic", "list"], text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, timeout=timeout_s, check=False,
+        env=base_process_environment(),
     )
+    output = (completed.stdout or "").strip()
+    if completed.returncode:
+        raise RuntimeError(
+            "base DDS graph query failed; the standard testbed base services must "
+            f"already be running. exit={completed.returncode}, output={output[-1200:]}"
+        )
+    topics = {line.strip() for line in output.splitlines() if line.startswith("/")}
+    required = {"/swerve_drive_controller/odom", "/tmr_cycle/mission_cmd_vel"}
+    missing = sorted(required - topics)
+    if missing:
+        raise RuntimeError(
+            "base topics are not visible from the host-network container; verify "
+            "the testbed CycloneDDS/domain configuration. "
+            f"missing={missing}"
+        )
+    return {"label": "base_runtime", "output": output}
 
 
-def _run_remote_mover(arguments: str, *, timeout_s: float | None = None):
-    command, source = _remote_mover_command(arguments)
+def _mover_command(arguments: str) -> list[str]:
+    """Run the bundled Task 2 mover locally against the testbed DDS graph."""
+    return [
+        sys.executable, "-u", str(LOCAL_MOVER),
+        *arguments.split(), "--disable-collision-guard",
+    ]
+
+
+def _run_mover(arguments: str, *, timeout_s: float | None = None):
     return subprocess.run(
-        command,
-        input=source,
+        _mover_command(arguments),
         check=False,
         text=True,
         capture_output=True,
         timeout=timeout_s,
+        env=base_process_environment(),
     )
 
 
@@ -92,7 +113,7 @@ def guarded_move_right(
     """Execute one remote step with odometry feedback and collision guard disabled."""
     if not 0.008 <= abs(distance_m) <= 0.08:
         raise ValueError("absolute step distance must be in [0.008, 0.08] m")
-    completed = _run_remote_mover(
+    completed = _run_mover(
         f"--right-m {distance_m:.6f} --speed-mps {speed_mps:.4f} "
         f"--timeout-s {timeout_s:.1f}",
         timeout_s=timeout_s + 20.0,
@@ -114,7 +135,7 @@ def guarded_move_right_continuous(
     """Execute one uninterrupted long lateral move with live odometry feedback."""
     if not 0.008 <= abs(distance_m) <= 2.0:
         raise ValueError("absolute continuous distance must be in [0.008, 2.0] m")
-    completed = _run_remote_mover(
+    completed = _run_mover(
         f"--right-m {distance_m:.6f} --speed-mps {speed_mps:.4f} "
         f"--timeout-s {timeout_s:.1f}",
         timeout_s=timeout_s + 20.0,
@@ -136,7 +157,7 @@ def guarded_move_forward(
     """Execute one signed fore/aft step with odometry feedback."""
     if not 0.008 <= abs(distance_m) <= 0.08:
         raise ValueError("absolute step distance must be in [0.008, 0.08] m")
-    completed = _run_remote_mover(
+    completed = _run_mover(
         f"--forward-m {distance_m:.6f} --speed-mps {speed_mps:.4f} "
         f"--timeout-s {timeout_s:.1f}",
         timeout_s=timeout_s + 20.0,
@@ -158,7 +179,7 @@ def guarded_move_forward_continuous(
     """Execute one uninterrupted long fore/aft move with odometry feedback."""
     if not 0.008 <= abs(distance_m) <= 2.0:
         raise ValueError("absolute continuous distance must be in [0.008, 2.0] m")
-    completed = _run_remote_mover(
+    completed = _run_mover(
         f"--forward-m {distance_m:.6f} --speed-mps {speed_mps:.4f} "
         f"--timeout-s {timeout_s:.1f}",
         timeout_s=timeout_s + 20.0,

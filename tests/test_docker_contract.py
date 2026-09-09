@@ -55,19 +55,31 @@ class DockerContractTests(unittest.TestCase):
             flags=re.DOTALL,
         ).group("body"))
 
-    def test_operator_commands_share_host_lock_and_screen_session(self):
+    def test_operator_commands_require_no_development_host_directories(self):
         guide = (ROOT / "DOCKER.md").read_text(encoding="utf-8")
         self.assertNotIn("__PINNED_COMMIT__", guide)
-        self.assertIn(
-            "POLICY_COMMIT='7017c8b02e68fe654c9c34dd0d2bff4557747e0b'",
-            guide,
-        )
-        self.assertEqual(guide.count(
-            "src=/tmp/tmr_task2_motion.lock,dst=/tmp/tmr_task2_motion.lock"
-        ), 3)
-        self.assertEqual(guide.count("src=/run/screen,dst=/run/screen"), 3)
-        self.assertEqual(guide.count("dst=/opt/tmr-task2/policy/config"), 3)
+        self.assertIn("<FULL_40_CHARACTER_PINNED_COMMIT_SHA>", guide)
+        self.assertNotIn("src=/home/aup", guide)
+        self.assertNotIn("src=/run/screen", guide)
+        self.assertNotIn("src=/tmp/tmr_task2_motion.lock", guide)
+        self.assertNotIn("SSH_AUTH_SOCK", guide)
+        self.assertNotIn("TMR_SSH_IDENTITY_FILE", guide)
+        self.assertNotIn("ssh -", guide)
         self.assertNotIn("--privileged \\", guide)
+
+    def test_custom_interfaces_and_camera_bridge_are_built_into_image(self):
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        entrypoint = (ROOT / "docker" / "entrypoint.sh").read_text(encoding="utf-8")
+        self.assertIn("/opt/tmr-interfaces/install/setup.bash", entrypoint)
+        self.assertIn("colcon build --merge-install", dockerfile)
+        self.assertIn("franka_spine_msgs", dockerfile)
+        self.assertIn("camera_viewer.py --port 18081", entrypoint)
+        self.assertNotIn("tmr_env.sh", entrypoint)
+        self.assertNotIn("/run/screen", entrypoint)
+        self.assertTrue((ROOT / "third_party" / "franka_ros2_interfaces" /
+                         "franka_msgs" / "package.xml").is_file())
+        self.assertTrue((ROOT / "third_party" / "franka_ros2_interfaces" /
+                         "franka_spine_msgs" / "package.xml").is_file())
 
 
 if __name__ == "__main__":

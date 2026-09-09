@@ -20,14 +20,12 @@ from mission_runtime import (
     atomic_write_json,
     release_motion_lock,
 )
+from base_motion import check_base_runtime
 
 
 ROOT = Path(__file__).resolve().parent
-REFERENCE_ROOT = Path("/home/aup/tmr-mobile-manipulation")
-ROS_ENV = Path("/home/aup/tmr_env.sh")
 READY_RECORD = ROOT / "runtime" / "latest_quick_start.json"
 VIEWER_URL = "http://127.0.0.1:18081/status.json"
-BASE_HOST = "tmr-user@172.16.0.50"
 DIRECT_OPENER = build_opener(ProxyHandler({}))
 
 REQUIRED_SERVICES = {
@@ -80,7 +78,6 @@ def run(command: list[str], label: str, timeout_s: float = 60.0) -> dict:
 
 def ros_cli(arguments: list[str], label: str, timeout_s: float = 12.0) -> dict:
     command = (
-        f"source {ROS_ENV}; "
         "export PYTHONPATH=/usr/lib/python3/dist-packages:${PYTHONPATH:-}; "
         + " ".join(arguments)
     )
@@ -141,52 +138,18 @@ def advancing_cameras(delay_s: float = 1.2) -> dict:
 def ensure_viewer() -> dict:
     try:
         return advancing_cameras()
-    except Exception as first_error:
-        viewer = REFERENCE_ROOT / "tools" / "three_camera_mjpeg_viewer.py"
-        if not viewer.is_file():
-            raise StartupBlocked(f"three-camera viewer is missing: {viewer}") from first_error
-        # The viewer owns no camera device; it only bridges existing RGB
-        # streams, so replacing a stale instance cannot steal FCI or D405.
-        subprocess.run(
-            ["screen", "-S", "tmr_dual_rgb_viewer", "-X", "quit"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        command = (
-            f"source {ROS_ENV}; exec /usr/bin/python3 -u {viewer} --port 18081"
-        )
-        started = subprocess.run(
-            [
-                "screen", "-L", "-Logfile", "/tmp/tmr_dual_rgb_viewer.log",
-                "-dmS", "tmr_dual_rgb_viewer", "/bin/bash", "-lc", command,
-            ],
-            check=False,
-        )
-        if started.returncode:
-            raise StartupBlocked("failed to launch the three-camera viewer") from first_error
-        deadline = time.monotonic() + 15.0
-        last_error: Exception = first_error
-        while time.monotonic() < deadline:
-            try:
-                result = advancing_cameras()
-                result["viewer"] = "restarted"
-                return result
-            except Exception as exc:
-                last_error = exc
-                time.sleep(0.5)
-        raise StartupBlocked(f"camera viewer did not become fresh: {last_error}")
+    except Exception as error:
+        raise StartupBlocked(
+            "bundled camera viewer has no fresh main/left frames; verify the deployed "
+            f"camera topics and CycloneDDS connectivity: {error}"
+        ) from error
 
 
 def ensure_base_runtime() -> dict:
-    return run(
-        [
-            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", BASE_HOST,
-            "bash /home/tmr-user/tmr_cycle/scripts/19_ensure_navigation_stack.sh",
-        ],
-        "base_runtime",
-        150.0,
-    )
+    try:
+        return check_base_runtime()
+    except RuntimeError as error:
+        raise StartupBlocked(str(error)) from error
 
 
 def ensure_left_runtime() -> dict:
@@ -198,8 +161,6 @@ def ensure_left_runtime() -> dict:
 
 
 def prepare() -> dict:
-    if not ROS_ENV.is_file():
-        raise StartupBlocked(f"robot environment is missing: {ROS_ENV}")
     graph = require_core_graph()
     results = [graph]
     # Base and left arm use separate robot interfaces.  Bringing them to a

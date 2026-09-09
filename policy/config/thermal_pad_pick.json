@@ -48,7 +48,7 @@
     "path_samples_per_segment": 40
   },
   "hand_eye": {
-    "source": "/home/aup/tmr-mobile-manipulation/grasp/config/left_hand_eye_calibrated.yaml",
+    "source": "embedded calibrated transform; no external runtime file required",
     "parent_semantics": "measured_left_end_effector",
     "link8_to_measured_ee_local_m": [0.0, 0.0, 0.174],
     "transform_parent_from_color_camera_row_major": [

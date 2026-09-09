@@ -1,48 +1,33 @@
 # Docker deployment
 
-The image packages the Task 2 Python policy, OpenCV/NumPy, ROS 2 Jazzy command
-line tools and standard messages, CycloneDDS, SSH, curl, and screen. Runtime
-code, configuration, and calibration captures are grouped under `policy/`.
+The image is self-contained at build time. It includes the Task 2 policy,
+OpenCV/NumPy, ROS 2 Jazzy, CycloneDDS configuration, the camera-to-MJPEG
+bridge, and the exact `franka_msgs` and `franka_spine_msgs` interfaces used by
+the policy. It does **not** require `/home/aup/tmr_env.sh`,
+`/home/aup/tmr-mobile-manipulation`, `/home/aup/.ssh`, or `/run/screen`.
 
-The deployed testbed's custom `franka_msgs`/`franka_spine_msgs` overlays and
-DDS configuration remain the source of truth. At runtime, `/home/aup` is
-mounted read-only at the same absolute path so `tmr_env.sh` and its overlay
-prefixes work without copying hardware-specific build artifacts into the
-image. Policy records, output images, and runtime state are mounted separately
-as writable directories.
-
-The container is fail-closed. Its default command is `check`, which performs
-read-only ROS graph and camera checks. Physical motion starts only through the
-explicit `execute` mode.
+The default command is the read-only `check` mode. Physical motion starts only
+through the explicit `execute` mode.
 
 ## Operator commands
 
-Run these commands on robot host `.100` as user `aup`. They start from a clean
-checkout of the pinned policy commit.
+Run on the robot computer at `172.16.0.100`. Set `POLICY_COMMIT` to the same
+full 40-character SHA entered in the submission form.
 
 ```bash
 set -euo pipefail
 
 export POLICY_REPOSITORY='https://github.com/L-F23/tmr_franka_task2_grasp.git'
-export POLICY_COMMIT='7017c8b02e68fe654c9c34dd0d2bff4557747e0b'
+export POLICY_COMMIT='<FULL_40_CHARACTER_PINNED_COMMIT_SHA>'
 export POLICY_IMAGE="tmr-task2-policy:${POLICY_COMMIT}"
-export POLICY_CHECKOUT="$HOME/tmr-task2-policy-${POLICY_COMMIT}"
+export POLICY_CHECKOUT="$PWD/tmr-task2-policy-${POLICY_COMMIT}"
 
-test -r /home/aup/tmr_env.sh
-test -d /home/aup/tmr-mobile-manipulation
-test -d /home/aup/.ssh
-test -d /run/screen
 test ! -e "$POLICY_CHECKOUT"
-ssh -o BatchMode=yes -o ConnectTimeout=5 tmr-user@172.16.0.50 true
-
 git clone "$POLICY_REPOSITORY" "$POLICY_CHECKOUT"
 cd "$POLICY_CHECKOUT"
 git checkout --detach "$POLICY_COMMIT"
 test "$(git rev-parse HEAD)" = "$POLICY_COMMIT"
 test -z "$(git status --porcelain)"
-
-mkdir -p policy/outputs policy/runtime
-touch /tmp/tmr_task2_motion.lock
 
 docker build --pull \
   --build-arg POLICY_UID="$(id -u)" \
@@ -50,21 +35,18 @@ docker build --pull \
   --build-arg POLICY_REVISION="$POLICY_COMMIT" \
   --tag "$POLICY_IMAGE" \
   .
+
+docker volume create "tmr-task2-config-${POLICY_COMMIT}"
+docker volume create "tmr-task2-outputs-${POLICY_COMMIT}"
+docker volume create "tmr-task2-runtime-${POLICY_COMMIT}"
 ```
 
-Validate the image and the mounted custom ROS environment without contacting
-the robot graph or sending motion:
+Validate the image without contacting the robot graph or sending motion:
 
 ```bash
 docker run --rm \
   --network host \
   --ipc host \
-  --mount type=bind,src=/home/aup,dst=/home/aup,readonly \
-  --mount type=bind,src=/run/screen,dst=/run/screen \
-  --mount type=bind,src=/tmp/tmr_task2_motion.lock,dst=/tmp/tmr_task2_motion.lock \
-  --mount type=bind,src="$POLICY_CHECKOUT/policy/config",dst=/opt/tmr-task2/policy/config \
-  --mount type=bind,src="$POLICY_CHECKOUT/policy/outputs",dst=/opt/tmr-task2/policy/outputs \
-  --mount type=bind,src="$POLICY_CHECKOUT/policy/runtime",dst=/opt/tmr-task2/policy/runtime \
   "$POLICY_IMAGE" preflight
 ```
 
@@ -74,17 +56,14 @@ Run the read-only ROS graph and camera health check:
 docker run --rm \
   --network host \
   --ipc host \
-  --mount type=bind,src=/home/aup,dst=/home/aup,readonly \
-  --mount type=bind,src=/run/screen,dst=/run/screen \
-  --mount type=bind,src=/tmp/tmr_task2_motion.lock,dst=/tmp/tmr_task2_motion.lock \
-  --mount type=bind,src="$POLICY_CHECKOUT/policy/config",dst=/opt/tmr-task2/policy/config \
-  --mount type=bind,src="$POLICY_CHECKOUT/policy/outputs",dst=/opt/tmr-task2/policy/outputs \
-  --mount type=bind,src="$POLICY_CHECKOUT/policy/runtime",dst=/opt/tmr-task2/policy/runtime \
+  --mount type=volume,src="tmr-task2-config-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/config \
+  --mount type=volume,src="tmr-task2-outputs-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/outputs \
+  --mount type=volume,src="tmr-task2-runtime-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/runtime \
   "$POLICY_IMAGE" check
 ```
 
-After the operator has confirmed the required initial pose, gripper state,
-clear workspace, and reachable emergency stop, launch the policy with:
+After the standard testbed services are running, launch the policy directly;
+no authentication file, SSH agent, or host-side project directory is needed:
 
 ```bash
 docker run --rm --interactive --tty \
@@ -92,33 +71,72 @@ docker run --rm --interactive --tty \
   --stop-timeout 10 \
   --network host \
   --ipc host \
-  --mount type=bind,src=/home/aup,dst=/home/aup,readonly \
-  --mount type=bind,src=/run/screen,dst=/run/screen \
-  --mount type=bind,src=/tmp/tmr_task2_motion.lock,dst=/tmp/tmr_task2_motion.lock \
-  --mount type=bind,src="$POLICY_CHECKOUT/policy/config",dst=/opt/tmr-task2/policy/config \
-  --mount type=bind,src="$POLICY_CHECKOUT/policy/outputs",dst=/opt/tmr-task2/policy/outputs \
-  --mount type=bind,src="$POLICY_CHECKOUT/policy/runtime",dst=/opt/tmr-task2/policy/runtime \
+  --mount type=volume,src="tmr-task2-config-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/config \
+  --mount type=volume,src="tmr-task2-outputs-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/outputs \
+  --mount type=volume,src="tmr-task2-runtime-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/runtime \
   "$POLICY_IMAGE" execute
 ```
 
-The image entrypoint is:
+Before `execute`, confirm the required initial pose, gripper state, clear work
+area, reachable emergency stop, and that the standard arm, camera, Spine, and
+base services are already running. The policy performs a fail-closed preflight
+and does not start duplicate hardware drivers.
+
+## Entrypoint
 
 ```text
 /usr/bin/tini -- /opt/tmr-task2/docker/entrypoint.sh
 ```
 
-`docker/entrypoint.sh` changes to `/opt/tmr-task2/policy`, sources
-`/opt/ros/jazzy/setup.bash` and the mounted `/home/aup/tmr_env.sh`, validates
-every required custom message import, and then launches
-`/usr/bin/python3 -u quick_start.py --execute` for `execute` mode.
+For `execute`, the entrypoint sources `/opt/ros/jazzy/setup.bash` and the
+built-in `/opt/tmr-interfaces/install/setup.bash`, starts the bundled camera
+bridge, validates all required Python and ROS interfaces, and launches:
 
-No `--privileged` flag or device mount is required. The real-time FCI and base
-controller processes remain on their respective robot hosts; this container is
-the policy/orchestration client.
+```text
+/usr/bin/python3 -u /opt/tmr-task2/policy/quick_start.py --execute
+```
 
-The bind-mounted `/tmp/tmr_task2_motion.lock` preserves the repository's
-single-instance `flock` contract across native host processes and policy
-containers. The `/run/screen` mount lets the policy reuse or replace the
-existing host camera-viewer session instead of starting an untracked duplicate.
-ROS logs and caches are redirected to container-local `/tmp` paths so the
-testbed home directory can remain read-only.
+The writable `/tmp/tmr_task2_motion.lock` is created inside the container; no
+host lock file is required. The named volumes preserve calibration/config,
+output images, and runtime records. No `--privileged`, device mount,
+`/home/aup` bind mount, or `/run/screen` bind mount is used.
+
+## Environment and dependencies
+
+- Base image: digest-pinned `ros:jazzy-ros-base-noble` (Ubuntu 24.04,
+  ROS 2 Jazzy).
+- ROS middleware: `rmw_cyclonedds_cpp`, domain 0, host networking, bundled DDS
+  configuration with automatic interface selection and explicit peers
+  `172.16.0.50` and `172.16.0.100`.
+- Franka interfaces: upstream `franka_ros2` v3.4.1 at commit
+  `b4164f555500fe50c3f44f24d4cccc452ffac442`, built in the image.
+- GPU/CUDA: not used; no GPU, CUDA toolkit, or NVIDIA driver is required.
+- Runtime network: no Internet access is required. Layer-2/IP access to the
+  testbed controllers and ROS graph is required. No runtime authentication is
+  required by the policy.
+- Host: Linux with Docker Engine, host networking support, and enough free
+  disk space to build the ROS image.
+
+## Hardware assumptions
+
+- Two deployed Franka FR3 arms, Robotiq grippers, Franka Spine, ZED head
+  camera, and left/right Intel RealSense D405 wrist cameras are started by the
+  normal testbed procedure before policy launch.
+- The policy expects the ROS service/action/topic names checked by
+  `policy/quick_start.py`; camera topics can be overridden with
+  `TMR_MAIN_CAMERA_TOPIC`, `TMR_LEFT_CAMERA_TOPIC`, and
+  `TMR_RIGHT_CAMERA_TOPIC`.
+- The mobile base controller publishes `/swerve_drive_controller/odom` and
+  subscribes to `/tmr_cycle/mission_cmd_vel` on the testbed DDS graph. The
+  bundled odometry-closed-loop worker runs inside the host-network container.
+  If the testbed uses a nonzero DDS domain, pass it as
+  `--env TMR_BASE_ROS_DOMAIN_ID=<id>`.
+- No GPU inference rate applies. Camera freshness is checked approximately
+  one second apart; base commands use live odometry and bounded timeouts.
+- Camera placement, hand-eye transform, arm initial pose, table/object layout,
+  and calibrated distances must match the Task 2 testbed setup shown in the
+  demo and stored under `policy/config/`. Lighting must allow the red/gray/black
+  color and structure detectors to separate their targets.
+- Between rounds, return both arms, Spine, base, grippers, thermal pad, and red
+  placement pad to their documented initial state, clear previous objects from
+  the path, and verify the emergency stop.

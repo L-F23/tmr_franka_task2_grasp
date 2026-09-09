@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Base-local CCW rotation and rear-wall docking controller for Task 2.
+"""CCW rotation and rear-wall docking controller for Task 2.
 
-This file is streamed to the base computer and runs inside its isolated ROS 2
-graph.  Rear-wall range is measured from the robot body rear face, not from the
-odometry origin.  LiDAR is used for wall pose estimation only; it is not used
-as a general collision guard in this stage.
+This file runs inside the host-network policy container and communicates with
+the deployed base over the testbed DDS graph. Rear-wall range is measured from
+the robot body rear face, not from the odometry origin. LiDAR is used for wall
+pose estimation only; it is not used as a general collision guard in this
+stage.
 """
 
 from __future__ import annotations

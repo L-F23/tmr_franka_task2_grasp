@@ -45,8 +45,6 @@ def test_camera_gate_requires_advancing_main_and_left(monkeypatch):
 
 
 def test_prepare_runs_independent_runtime_checks_and_sets_no_motion(monkeypatch, tmp_path):
-    monkeypatch.setattr(quick_start, "ROS_ENV", tmp_path / "tmr_env.sh")
-    quick_start.ROS_ENV.write_text("true\n")
     monkeypatch.setattr(quick_start, "READY_RECORD", tmp_path / "ready.json")
     monkeypatch.setattr(quick_start, "require_core_graph", lambda: {"label": "graph"})
     monkeypatch.setattr(quick_start, "ensure_base_runtime", lambda: {"label": "base"})
