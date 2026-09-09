@@ -17,6 +17,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        openssh-client \
         python3-colcon-common-extensions \
         python3-numpy \
         python3-opencv \
@@ -28,6 +29,7 @@ RUN apt-get update \
         ros-jazzy-realsense2-camera-msgs \
         ros-jazzy-rmw-cyclonedds-cpp \
         ros-jazzy-rosidl-default-generators \
+        tar \
         tini \
     && rm -rf /var/lib/apt/lists/*
 
@@ -77,6 +79,9 @@ RUN mkdir -p /opt/tmr-interfaces/src \
     && chown -R "${POLICY_UID}:${POLICY_GID}" /opt/tmr-interfaces
 
 RUN chmod 0755 /opt/tmr-task2/docker/entrypoint.sh \
+        /opt/tmr-task2/policy/base_runtime/ensure_runtime.sh \
+    && bash -n /opt/tmr-task2/docker/entrypoint.sh \
+        /opt/tmr-task2/policy/base_runtime/ensure_runtime.sh \
     && mkdir -p /opt/tmr-task2/policy/outputs /opt/tmr-task2/policy/runtime \
     && chown -R "${POLICY_UID}:${POLICY_GID}" \
         /opt/tmr-task2/policy/outputs /opt/tmr-task2/policy/runtime \

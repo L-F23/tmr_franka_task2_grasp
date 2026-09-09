@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Bridge the three deployed ROS RGB topics to local MJPEG endpoints."""
+"""Bridge the base-local ZED JPEG and Jazzy wrist topics to MJPEG endpoints."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import time
+from urllib.request import ProxyHandler, build_opener
 
 import cv2
 import numpy as np
@@ -16,22 +18,23 @@ import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import CompressedImage, Image
+from sensor_msgs.msg import Image
 
 
 DEFAULT_TOPICS = {
-    "main": "/head_camera/zed/rgb/color/rect/image/compressed",
     "left": "/wrist_camera_left/color/image_raw",
     "right": "/wrist_camera_right/color/image_raw",
 }
+DEFAULT_MAIN_URL = "http://172.16.0.50:18082/tmr_zed_latest.jpg"
+DIRECT_OPENER = build_opener(ProxyHandler({}))
 
 
 class FrameStore:
     def __init__(self) -> None:
         self._condition = threading.Condition()
         self._frames: dict[str, bytes] = {}
-        self._sequence = {name: 0 for name in DEFAULT_TOPICS}
-        self._updated = {name: 0.0 for name in DEFAULT_TOPICS}
+        self._sequence = {name: 0 for name in ("main", "left", "right")}
+        self._updated = {name: 0.0 for name in ("main", "left", "right")}
 
     def update(self, name: str, image: np.ndarray) -> None:
         ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -39,6 +42,13 @@ class FrameStore:
             return
         with self._condition:
             self._frames[name] = encoded.tobytes()
+            self._sequence[name] += 1
+            self._updated[name] = time.monotonic()
+            self._condition.notify_all()
+
+    def update_jpeg(self, name: str, payload: bytes) -> None:
+        with self._condition:
+            self._frames[name] = payload
             self._sequence[name] += 1
             self._updated[name] = time.monotonic()
             self._condition.notify_all()
@@ -74,9 +84,6 @@ class CameraBridge(Node):
         self._store = store
         self._bridge = CvBridge()
         self.create_subscription(
-            CompressedImage, topics["main"], self._main_callback, qos_profile_sensor_data
-        )
-        self.create_subscription(
             Image, topics["left"], lambda msg: self._raw_callback("left", msg),
             qos_profile_sensor_data,
         )
@@ -85,11 +92,6 @@ class CameraBridge(Node):
             qos_profile_sensor_data,
         )
 
-    def _main_callback(self, message: CompressedImage) -> None:
-        image = cv2.imdecode(np.frombuffer(message.data, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if image is not None:
-            self._store.update("main", image)
-
     def _raw_callback(self, name: str, message: Image) -> None:
         try:
             image = self._bridge.imgmsg_to_cv2(message, desired_encoding="bgr8")
@@ -97,6 +99,31 @@ class CameraBridge(Node):
             self.get_logger().error(f"failed to convert {name} frame: {exc}")
             return
         self._store.update(name, image)
+
+
+def poll_main_camera(store: FrameStore, url: str, period_s: float) -> None:
+    """Poll the base-local atomic JPEG without using an HTTP proxy."""
+    previous_digest = None
+    while True:
+        started = time.monotonic()
+        try:
+            with DIRECT_OPENER.open(url, timeout=1.0) as response:
+                payload = response.read(8_000_001)
+            valid = (
+                16 <= len(payload) <= 8_000_000
+                and payload.startswith(b"\xff\xd8")
+                and payload.endswith(b"\xff\xd9")
+            )
+            if valid:
+                digest = hashlib.blake2s(payload, digest_size=16).digest()
+                if digest != previous_digest:
+                    store.update_jpeg("main", payload)
+                    previous_digest = digest
+        except Exception:
+            pass
+        remaining = period_s - (time.monotonic() - started)
+        if remaining > 0:
+            time.sleep(remaining)
 
 
 def handler_class(store: FrameStore):
@@ -158,12 +185,21 @@ def handler_class(store: FrameStore):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=18081)
+    parser.add_argument(
+        "--main-url", default=os.environ.get("TMR_MAIN_CAMERA_URL", DEFAULT_MAIN_URL)
+    )
+    parser.add_argument("--main-period-s", type=float, default=0.10)
     args = parser.parse_args()
     topics = {
         name: os.environ.get(f"TMR_{name.upper()}_CAMERA_TOPIC", topic)
         for name, topic in DEFAULT_TOPICS.items()
     }
     store = FrameStore()
+    threading.Thread(
+        target=poll_main_camera,
+        args=(store, args.main_url, max(0.05, args.main_period_s)),
+        daemon=True,
+    ).start()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), handler_class(store))
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()

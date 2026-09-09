@@ -125,6 +125,11 @@ class GuardedLateralStep(Node):
         for _ in range(30):
             self.publish(0.0, 0.0, 0.0)
             rclpy.spin_once(self, timeout_sec=0.025)
+        lease = Bool()
+        lease.data = False
+        for _ in range(10):
+            self.lease_pub.publish(lease)
+            rclpy.spin_once(self, timeout_sec=0.025)
 
     def wait_ready(self) -> None:
         deadline = time.monotonic() + 10.0

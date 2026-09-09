@@ -13,8 +13,8 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
-import sys
 import time
 from urllib.request import ProxyHandler, build_opener
 
@@ -23,7 +23,9 @@ import numpy as np
 
 from alignment_detector import detect_target
 from base_motion import (
-    base_process_environment,
+    REMOTE_ROOT,
+    base_environment,
+    ssh_command,
     _extract_last_json_object,
     guarded_move_right,
 )
@@ -38,7 +40,6 @@ from mission_runtime import (
 ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = ROOT / "config" / "wall_dock_search.json"
 DEFAULT_RECORD = ROOT / "config" / "latest_wall_dock_search.json"
-BASE_CONTROLLER = ROOT / "stage0_wall_docking_base.py"
 DIRECT_OPENER = build_opener(ProxyHandler({}))
 
 
@@ -156,14 +157,19 @@ def fresh_main_frame(
 
 
 def run_base_controller(arguments: list[str], timeout_s: float) -> dict:
+    remote_controller = f"{REMOTE_ROOT}/stage0_wall_docking_base.py"
+    remote = (
+        f"{base_environment()}; timeout --signal=INT --kill-after=3 "
+        f"{timeout_s + 5:.1f} python3 -u {shlex.quote(remote_controller)} "
+        + shlex.join(arguments)
+    )
     completed = subprocess.run(
-        [sys.executable, "-u", str(BASE_CONTROLLER), *arguments],
+        ssh_command(remote),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         timeout=timeout_s + 20.0,
         check=False,
-        env=base_process_environment(),
     )
     if completed.returncode:
         raise RuntimeError(

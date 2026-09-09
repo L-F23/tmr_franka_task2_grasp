@@ -15,20 +15,21 @@ def test_all_motion_entrypoints_share_one_task_lock():
     assert run_from_pregrasp_to_finish.LOCK_FILE == LOCK_FILE
 
 
-def test_base_mover_is_bundled_local_process_with_collision_guard_disabled():
+def test_base_mover_runs_staged_source_in_isolated_base_graph():
     command = base_motion._mover_command("--right-m 0.020")
     joined = " ".join(command)
     assert "guarded_lateral_step.py --right-m 0.020 --disable-collision-guard" in joined
     assert "tmr-mobile-manipulation" not in joined
-    assert "ssh" not in joined
+    assert command[0] == "ssh"
+    assert "ROS_DOMAIN_ID=${TMR_CYCLE_ROS_DOMAIN_ID:-97}" in joined
+    assert "ROS_LOCALHOST_ONLY=${TMR_CYCLE_ROS_LOCALHOST_ONLY:-1}" in joined
 
 
-def test_base_runtime_defaults_to_network_visible_domain_zero(monkeypatch):
-    monkeypatch.delenv("TMR_BASE_ROS_DOMAIN_ID", raising=False)
-    monkeypatch.delenv("TMR_BASE_ROS_LOCALHOST_ONLY", raising=False)
-    environment = base_motion.base_process_environment()
-    assert environment["ROS_DOMAIN_ID"] == "0"
-    assert environment["ROS_LOCALHOST_ONLY"] == "0"
+def test_base_login_does_not_assume_a_host_ssh_directory():
+    command = base_motion.ssh_command("true")
+    joined = " ".join(command)
+    assert "/home/aup/.ssh" not in joined
+    assert "UserKnownHostsFile=/tmp/tmr_task2_known_hosts" in joined
 
 
 def test_arm_collision_gate_is_explicitly_disabled():

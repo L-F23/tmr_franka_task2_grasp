@@ -9,7 +9,6 @@
     </General>
     <Discovery>
       <Peers>
-        <Peer address="172.16.0.50"/>
         <Peer address="172.16.0.100"/>
       </Peers>
     </Discovery>

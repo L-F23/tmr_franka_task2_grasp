@@ -62,9 +62,9 @@ class DockerContractTests(unittest.TestCase):
         self.assertNotIn("src=/home/aup", guide)
         self.assertNotIn("src=/run/screen", guide)
         self.assertNotIn("src=/tmp/tmr_task2_motion.lock", guide)
-        self.assertNotIn("SSH_AUTH_SOCK", guide)
+        self.assertIn("SSH_AUTH_SOCK", guide)
+        self.assertIn("dst=/tmp/tmr-task2-ssh-agent.sock", guide)
         self.assertNotIn("TMR_SSH_IDENTITY_FILE", guide)
-        self.assertNotIn("ssh -", guide)
         self.assertNotIn("--privileged \\", guide)
 
     def test_custom_interfaces_and_camera_bridge_are_built_into_image(self):
@@ -74,12 +74,24 @@ class DockerContractTests(unittest.TestCase):
         self.assertIn("colcon build --merge-install", dockerfile)
         self.assertIn("franka_spine_msgs", dockerfile)
         self.assertIn("camera_viewer.py --port 18081", entrypoint)
+        self.assertIn("stage_base_policy", entrypoint)
+        self.assertIn("guarded_lateral_step.py stage0_wall_docking_base.py base_runtime", entrypoint)
         self.assertNotIn("tmr_env.sh", entrypoint)
         self.assertNotIn("/run/screen", entrypoint)
         self.assertTrue((ROOT / "third_party" / "franka_ros2_interfaces" /
                          "franka_msgs" / "package.xml").is_file())
         self.assertTrue((ROOT / "third_party" / "franka_ros2_interfaces" /
                          "franka_spine_msgs" / "package.xml").is_file())
+
+    def test_base_runtime_is_staged_without_an_external_repository(self):
+        source = (ROOT / "policy" / "base_runtime" /
+                  "ensure_runtime.sh").read_text(encoding="utf-8")
+        adapter = (ROOT / "policy" / "base_runtime" /
+                   "cmd_vel_adapter.py").read_text(encoding="utf-8")
+        self.assertIn("/swerve_drive_controller/odom", source)
+        self.assertIn("/tmr_cycle/mission_cmd_vel", source)
+        self.assertIn("/swerve_drive_controller/cmd_vel", adapter)
+        self.assertNotIn("tmr-mobile-manipulation", source + adapter)
 
 
 if __name__ == "__main__":

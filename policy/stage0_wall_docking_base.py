@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """CCW rotation and rear-wall docking controller for Task 2.
 
-This file runs inside the host-network policy container and communicates with
-the deployed base over the testbed DDS graph. Rear-wall range is measured from
-the robot body rear face, not from the odometry origin. LiDAR is used for wall
-pose estimation only; it is not used as a general collision guard in this
-stage.
+This file is staged from the policy image and runs inside the base computer's
+isolated ROS 2 Humble graph. Rear-wall range is measured from the robot body
+rear face, not from the odometry origin. LiDAR is used for wall pose estimation
+only; it is not used as a general collision guard in this stage.
 """
 
 from __future__ import annotations
@@ -232,6 +231,11 @@ class WallDockingController(Node):
         self.command[:] = (0.0, 0.0, 0.0)
         for _ in range(30):
             self.publish(0.0, 0.0, 0.0)
+            rclpy.spin_once(self, timeout_sec=0.025)
+        lease = Bool()
+        lease.data = False
+        for _ in range(10):
+            self.lease_pub.publish(lease)
             rclpy.spin_once(self, timeout_sec=0.025)
 
     def wait_ready(self, *, require_wall: bool) -> None:
