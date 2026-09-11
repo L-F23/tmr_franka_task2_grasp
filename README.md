@@ -48,11 +48,10 @@ file.
 
 ## Docker quick start
 
-Run the Docker workflow on robot host `.100` as user `aup`. Use the complete,
+Run the Docker workflow on the current `172.16.16.50` evaluation computer. Use the complete,
 copy-ready commands in [Docker deployment](DOCKER.md#operator-commands); that
 document starts from the submitted pinned commit and requires no host project,
-setup file, private-key directory, or screen session. It forwards the testbed's
-existing SSH-agent login to stage the bundled base worker on `.50`.
+setup file, SSH connection, private-key directory, or screen session.
 
 1. Run the operator checkout and `docker build` block.
 2. Run `preflight` to validate the image and bundled ROS environment without
@@ -61,15 +60,15 @@ existing SSH-agent login to stage the bundled base worker on `.50`.
 4. Only after confirming the initial pose, gripper state, clear workspace, and
    reachable emergency stop, run `execute` to allow physical motion.
 
-The image defaults to `check` when no mode is supplied. Its entrypoint is
+The image defaults to `check` when no mode is supplied. It uses ROS 2 Humble
+and Fast DDS to match the current native Humble graph; no Jazzy participant or
+explicit DDS peer list is created. Its entrypoint is
 `/usr/bin/tini -- /opt/tmr-task2/docker/entrypoint.sh`, and the entrypoint runs
 the policy from `/opt/tmr-task2/policy`. The image builds the pinned Franka and
-Spine ROS interfaces and includes its CycloneDDS configuration and camera
-bridge. It does not mount or require `/home/aup/tmr_env.sh`,
+Spine ROS interfaces and includes its camera bridge. It does not mount or require `/home/aup/tmr_env.sh`,
 `/home/aup/tmr-mobile-manipulation`, `/home/aup/.ssh`, or `/run/screen`.
 Writable configuration, outputs, and runtime records use Docker volumes. The
-base worker and velocity adapter are transferred from the image to an isolated
-temporary directory on `.50`, where they run in the native Humble Domain 97.
+bundled base worker and velocity adapter run locally in the same Humble graph.
 
 ## One-line command
 
@@ -82,7 +81,7 @@ The initialization target is stored in `config/initial_pose.json`. After every s
 The default input is:
 
 ```text
-http://172.16.0.50:18082/tmr_zed_latest.jpg
+http://172.16.16.50:18082/tmr_zed_latest.jpg
 ```
 
 The output JSON contains the target center in pixel and normalized coordinates, the four corner coordinates, major-axis direction, pixel length and width, area, and confidence. Exit code `0` means detection succeeded, `2` means no target was found, and `3` means the camera image did not update.
@@ -124,7 +123,7 @@ Allow actual lateral motion:
 
 The program prioritizes closed-loop centering with the left wrist camera. On-site calibration at the initial pose maps the top and bottom of the wrist image to the robot's left and right, respectively. The base therefore moves left when the target is above the image center and right when it is below. If the wrist camera cannot see the target, the target's horizontal position in the main camera provides the search direction. Each lateral step is limited to `0.02 m` by default. As required for the current Task 2 setup, the dual-LiDAR collision gate is disabled; motion constraints use only fresh odometry, a stationary-state check, the control lease, command subscribers, and timeouts. Zero velocity is still sent repeatedly whenever the program exits.
 
-Base motion is coordinated from the host-network container, but its bundled worker runs on `.50` inside the native Humble Domain 97. The image stages that worker through the testbed's existing non-interactive connection; it does not invoke a remote repository script, and no base command is sent to either arm.
+Base motion runs from the host-network Humble container against the current native Humble graph. It does not use SSH or invoke a remote repository script, and no base command is sent to either arm.
 
 ## Thermal-pad terminal-grasp FK/IK
 
@@ -174,9 +173,9 @@ After confirming that the robot is at the task's specified starting pose, the gr
 cd tmr_franka_task2_grasp/policy && /usr/bin/python3 -u quick_start.py --execute
 ```
 
-The quick-start entry point and every other motion entry point share the same single-instance lock. It first checks the core Jazzy ROS services, then restores the left arm's state-only runtime and checks the staged base-local Humble runtime in parallel, and finally requires the frame sequence numbers from the main camera and left wrist camera to continue increasing. Healthy services are reused rather than restarted; the container starts its own camera bridge, which subscribes to the wrist cameras in Jazzy and obtains the base-local ZED frame from `172.16.0.50:18082`. Bounded left-arm recovery runs only if the hardware is not `active` or the state stream is abnormal, in the fixed order: stop active controllers → ErrorRecovery → activate hardware → activate state broadcasters. If core drivers such as FR3, Robotiq, Spine, D405, base odometry, or IK are missing, the entry point does not guess or start a second instance. Instead, it fails before mission motion and reports the missing service, action, topic, or stale camera stream.
+The quick-start entry point and every other motion entry point share the same single-instance lock. It first checks the current Humble ROS services, then restores the left arm's state-only runtime and checks the native Humble base runtime in parallel, and finally requires the frame sequence numbers from the main camera and left wrist camera to continue increasing. Healthy services are reused rather than restarted; the container starts its own camera bridge, subscribes only to `/wrist_camera_left/camera/color/image_rect_raw`, and obtains the ZED frame from `172.16.16.50:18082`. Bounded left-arm recovery runs only if the hardware is not `active` or the state stream is abnormal, in the fixed order: stop active controllers → ErrorRecovery → activate hardware → activate state broadcasters. If core drivers such as FR3, Robotiq, Spine, D405, base odometry, or IK are missing, the entry point does not guess or start a second instance. Instead, it fails before mission motion and reports the missing service, action, topic, or stale camera stream.
 
-With `--execute`, the quick-start entry point passes a newly generated preparation record—valid for only 20 seconds and explicitly marked “no motion sent”—to the full workflow, avoiding duplicate initialization. Every base step still rechecks fresh odometry, stationary state, the control lease, the velocity-command subscriber, and its timeout. The staged base worker and zero-latching adapter run on `.50` in its isolated Humble graph; the arm-side policy client runs in the Jazzy container on `.100`, and the FCI real-time loops remain in the deployed robot drivers.
+With `--execute`, the quick-start entry point passes a newly generated preparation record—valid for only 20 seconds and explicitly marked “no motion sent”—to the full workflow, avoiding duplicate initialization. Every base step still rechecks fresh odometry, stationary state, the control lease, the velocity-command subscriber, and its timeout. The base worker, zero-latching adapter, and arm-side policy client all use Humble; the FCI real-time loops remain in the deployed robot drivers.
 
 The complete workflow entry point is:
 
@@ -210,6 +209,6 @@ cd tmr_franka_task2_grasp/policy && /usr/bin/python3 -u run_task2_from_initial.p
 
 This entry point likewise does not start robot services or perform the initial 2 m base transport, coarse black-base search, or table-edge calibration. The base must already be at the black-base grasp reference position. It still enforces multi-scale black-base calibration and the second gate immediately before gripper closure. Without `--execute`, it only prints the motion sequence.
 
-The complete entry point first restores the Spine to `0.6 m`, restores the right arm to its parking pose, then restores the left arm to its transport-safe initial pose. It stages and checks the bundled Task 2 worker and velocity adapter on the base host instead of depending on `tmr-mobile-manipulation` or another remote repository. The base moves right by `2.0 m` in one continuous odometry closed-loop trajectory without intermediate segmented stops. It then performs the coarse black-base search, enters the pre-grasp pose, runs fine multi-scale calibration, performs the strict force-feedback approach, and continues with transport and placement. It does not read or overwrite any Task 3 files.
+The complete entry point first restores the Spine to `0.6 m`, restores the right arm to its parking pose, then restores the left arm to its transport-safe initial pose. It checks the bundled Task 2 worker and velocity adapter locally instead of depending on `tmr-mobile-manipulation` or another repository. The base moves right by `2.0 m` in one continuous odometry closed-loop trajectory without intermediate segmented stops. It then performs the coarse black-base search, enters the pre-grasp pose, runs fine multi-scale calibration, performs the strict force-feedback approach, and continues with transport and placement. It does not read or overwrite any Task 3 files.
 
 Final release is performed by `stage5_release_diagonal.py`. It first descends by `1.5 cm`, then continues descending and gradually pitches downward by `20°` while retracting `10 cm` along an ease-out curve that starts fast and finishes slowly. It subsequently applies the calibrated `1.2 cm` leftward end-effector correction, an additional downward pitch, and inward follow-through. The gripper remains closed until the final vertical disengagement begins; only then does it open, rise by `5 cm`, and restore the left arm to its initial pose. The workflow record is written to `config/latest_full_thermal_pad_cycle.json`. Without `--execute`, the program only prints the plan and sends no motion command.

@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# Start or reuse the image-staged Task 2 velocity adapter on the base host.
+# Check the native Humble base graph and start/reuse the bundled adapter when requested.
 set -eo pipefail
+
+check_only=false
+if [[ "${1:-}" == "--check-only" ]]; then
+  check_only=true
+elif [[ $# -gt 0 ]]; then
+  echo '{"status":"failed","error":"unknown base-runtime argument"}' >&2
+  exit 64
+fi
 
 runtime_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 adapter="${runtime_dir}/cmd_vel_adapter.py"
@@ -32,9 +40,15 @@ if ! controller_has_subscriber; then
   exit 74
 fi
 
+if ${check_only}; then
+  printf '{"status":"success","base_runtime":"read_only","domain":%s}\n' \
+    "${ROS_DOMAIN_ID:-0}"
+  exit 0
+fi
+
 if topic_has_subscriber; then
   printf '{"status":"success","base_runtime":"existing_adapter","domain":%s}\n' \
-    "${ROS_DOMAIN_ID:-97}"
+    "${ROS_DOMAIN_ID:-0}"
   exit 0
 fi
 
@@ -54,7 +68,7 @@ printf '%s\n' "${adapter_pid}" >"${pid_file}"
 for _ in $(seq 1 30); do
   if topic_has_subscriber; then
     printf '{"status":"success","base_runtime":"staged_adapter","pid":%s,"domain":%s}\n' \
-      "${adapter_pid}" "${ROS_DOMAIN_ID:-97}"
+      "${adapter_pid}" "${ROS_DOMAIN_ID:-0}"
     exit 0
   fi
   if ! kill -0 "${adapter_pid}" 2>/dev/null; then

@@ -128,7 +128,7 @@ class ThermalPadPlanner(Node):
         self.ik_client = self.create_client(GetPositionIK, kin["ik_service"])
         self.validity_client = self.create_client(GetStateValidity, kin["validity_service"])
         self.motion_plan_client = self.create_client(
-            GetMotionPlan, kin.get("motion_plan_service", "/left_ik/plan_kinematic_path")
+            GetMotionPlan, kin.get("motion_plan_service", "/plan_kinematic_path")
         )
         self.spine_client = self.create_client(GetPosition, kin["spine_position_service"])
 

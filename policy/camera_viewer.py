@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bridge the base-local ZED JPEG and Jazzy wrist topics to MJPEG endpoints."""
+"""Bridge the testbed ZED JPEG and Humble wrist topic to MJPEG endpoints."""
 
 from __future__ import annotations
 
@@ -22,10 +22,9 @@ from sensor_msgs.msg import Image
 
 
 DEFAULT_TOPICS = {
-    "left": "/wrist_camera_left/color/image_raw",
-    "right": "/wrist_camera_right/color/image_raw",
+    "left": "/wrist_camera_left/camera/color/image_rect_raw",
 }
-DEFAULT_MAIN_URL = "http://172.16.0.50:18082/tmr_zed_latest.jpg"
+DEFAULT_MAIN_URL = "http://172.16.16.50:18082/tmr_zed_latest.jpg"
 DIRECT_OPENER = build_opener(ProxyHandler({}))
 
 
@@ -33,8 +32,8 @@ class FrameStore:
     def __init__(self) -> None:
         self._condition = threading.Condition()
         self._frames: dict[str, bytes] = {}
-        self._sequence = {name: 0 for name in ("main", "left", "right")}
-        self._updated = {name: 0.0 for name in ("main", "left", "right")}
+        self._sequence = {name: 0 for name in ("main", "left")}
+        self._updated = {name: 0.0 for name in ("main", "left")}
 
     def update(self, name: str, image: np.ndarray) -> None:
         ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -87,10 +86,6 @@ class CameraBridge(Node):
             Image, topics["left"], lambda msg: self._raw_callback("left", msg),
             qos_profile_sensor_data,
         )
-        self.create_subscription(
-            Image, topics["right"], lambda msg: self._raw_callback("right", msg),
-            qos_profile_sensor_data,
-        )
 
     def _raw_callback(self, name: str, message: Image) -> None:
         try:
@@ -138,13 +133,13 @@ def handler_class(store: FrameStore):
                 self.end_headers()
                 self.wfile.write(payload)
                 return
-            if path in ("/main.mjpg", "/left.mjpg", "/right.mjpg"):
+            if path in ("/main.mjpg", "/left.mjpg"):
                 self._stream(path[1:-5])
                 return
             if path == "/":
                 payload = (
                     b"<html><body><img src='/main.mjpg'>"
-                    b"<img src='/left.mjpg'><img src='/right.mjpg'></body></html>"
+                    b"<img src='/left.mjpg'></body></html>"
                 )
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")

@@ -1,24 +1,20 @@
 # Docker deployment
 
-The image contains the complete Task 2 policy and its ROS 2 Jazzy client
-environment. Arm, Spine, IK, and wrist-camera clients run in the host-network
-container on robot computer `.100`. At launch, the entrypoint stages the
-bundled base worker and zero-latching velocity adapter into an isolated
-`/tmp/tmr-task2-*` directory on `.50`; those processes run in the base
-computer's native ROS 2 Humble domain.
+This submission targets the current `172.16.16.50` evaluation computer and
+its native ROS 2 Humble graph. The container is also ROS 2 Humble. It does not
+join the graph with a Jazzy participant, use an explicit CycloneDDS peer list,
+or contact the obsolete `172.16.0.50`/`172.16.0.100` addresses.
 
-This preserves the deployed Humble/Jazzy and DDS-domain boundary used by the
-validated reference implementation. The image does not require
-`/home/aup/tmr_env.sh`, `/home/aup/tmr-mobile-manipulation`,
-`/home/aup/.ssh`, or `/run/screen`.
-
-The default mode is the read-only `check` mode. Physical motion starts only
-through the explicit `execute` mode.
+The image contains the Task 2 policy, OpenCV/NumPy, the required Franka
+interfaces, the camera bridge, and the fail-closed base velocity adapter. It
+does not require SSH, `tmr_env.sh`, another repository, or a host workspace
+mount. The default mode is the non-motion `check`; physical motion requires
+the explicit `execute` mode.
 
 ## Operator commands
 
-Run on robot computer `172.16.0.100`. Set `POLICY_COMMIT` to the full SHA
-submitted for evaluation.
+Run on the `172.16.16.50` evaluation computer. Set `POLICY_COMMIT` to the full
+40-character SHA submitted for evaluation.
 
 ```bash
 set -euo pipefail
@@ -45,46 +41,35 @@ docker build --pull \
 docker volume create "tmr-task2-config-${POLICY_COMMIT}" >/dev/null
 docker volume create "tmr-task2-outputs-${POLICY_COMMIT}" >/dev/null
 docker volume create "tmr-task2-runtime-${POLICY_COMMIT}" >/dev/null
-
-export POLICY_SSH_AUTH_SOCK="${SSH_AUTH_SOCK:?the existing .50 login must be loaded in ssh-agent}"
-test -S "$POLICY_SSH_AUTH_SOCK"
 ```
 
-Validate the image without contacting the robot graph or sending motion:
+Validate the image without joining the robot graph or sending motion:
 
 ```bash
 docker run --rm "$POLICY_IMAGE" preflight
 ```
 
-Verify the testbed's already-configured, non-interactive base login by
-forwarding its SSH-agent socket. No private key, `.ssh` directory, password,
-or credential file is copied or mounted into the image:
-
-```bash
-docker run --rm --network host \
-  --mount type=bind,src="$POLICY_SSH_AUTH_SOCK",dst=/tmp/tmr-task2-ssh-agent.sock \
-  --env SSH_AUTH_SOCK=/tmp/tmr-task2-ssh-agent.sock \
-  "$POLICY_IMAGE" shell -lc \
-  'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-    -o UserKnownHostsFile=/tmp/tmr_task2_known_hosts \
-    tmr-user@172.16.0.50 true'
-```
-
-After the normal testbed services are running, perform the read-only Jazzy ROS
-graph and camera health check:
+After the normal Humble testbed services are running, perform the non-motion
+graph, odometry, controller, and camera check:
 
 ```bash
 docker run --rm \
   --network host \
   --ipc host \
+  --env ROS_DOMAIN_ID=0 \
+  --env ROS_LOCALHOST_ONLY=0 \
+  --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+  --env TMR_MAIN_CAMERA_URL=http://172.16.16.50:18082/tmr_zed_latest.jpg \
+  --env TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/camera/color/image_rect_raw \
   --mount type=volume,src="tmr-task2-config-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/config \
   --mount type=volume,src="tmr-task2-outputs-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/outputs \
   --mount type=volume,src="tmr-task2-runtime-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/runtime \
   "$POLICY_IMAGE" check
 ```
 
-After confirming the initial state, clear workspace, and reachable emergency
-stop, launch the physical policy:
+Only after that command succeeds, confirm the designated initial state, clear
+all swept volumes, and verify that the emergency stop is reachable. Then
+launch the physical policy:
 
 ```bash
 docker run --rm --interactive --tty \
@@ -92,8 +77,11 @@ docker run --rm --interactive --tty \
   --stop-timeout 10 \
   --network host \
   --ipc host \
-  --mount type=bind,src="$POLICY_SSH_AUTH_SOCK",dst=/tmp/tmr-task2-ssh-agent.sock \
-  --env SSH_AUTH_SOCK=/tmp/tmr-task2-ssh-agent.sock \
+  --env ROS_DOMAIN_ID=0 \
+  --env ROS_LOCALHOST_ONLY=0 \
+  --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+  --env TMR_MAIN_CAMERA_URL=http://172.16.16.50:18082/tmr_zed_latest.jpg \
+  --env TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/camera/color/image_rect_raw \
   --mount type=volume,src="tmr-task2-config-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/config \
   --mount type=volume,src="tmr-task2-outputs-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/outputs \
   --mount type=volume,src="tmr-task2-runtime-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/runtime \
@@ -106,65 +94,57 @@ docker run --rm --interactive --tty \
 /usr/bin/tini -- /opt/tmr-task2/docker/entrypoint.sh
 ```
 
-For `execute`, the entrypoint:
-
-1. sources the image's Jazzy and Franka interface overlays;
-2. transfers `guarded_lateral_step.py`, `stage0_wall_docking_base.py`, and
-   `base_runtime/` from the image to `.50:/tmp/tmr-task2-policy`;
-3. starts the bundled three-camera bridge;
-4. verifies the deployed ROS graph and base-local runtime; and
-5. launches:
+In `execute` mode it launches:
 
 ```text
 /usr/bin/python3 -u /opt/tmr-task2/policy/quick_start.py --execute
 ```
 
-The base preflight starts or reuses the staged, zero-latching Task 2 velocity
-adapter only after fresh base odometry is observed. It never starts a second
-base controller. The writable `/tmp/tmr_task2_motion.lock` is created inside
-the container. No `--privileged`, device mount, host project bind mount,
-`tmr_env.sh`, or `/run/screen` mount is used.
+The read-only check expects these MoveIt services:
+
+```text
+/compute_fk
+/compute_ik
+/check_state_validity
+/plan_kinematic_path
+```
+
+It reads the ZED frame from
+`http://172.16.16.50:18082/tmr_zed_latest.jpg` and subscribes only to the left
+wrist color topic needed by the policy:
+`/wrist_camera_left/camera/color/image_rect_raw`. Avoiding the unused right
+wrist stream reduces DDS and image-copy load during evaluation.
 
 ## Environment and dependencies
 
-- Image base: digest-pinned `ros:jazzy-ros-base-noble` (Ubuntu 24.04,
-  ROS 2 Jazzy).
-- Container DDS: `rmw_cyclonedds_cpp`, domain 0, host networking, bundled
-  CycloneDDS configuration.
+- Image base: digest-pinned `ros:humble-ros-base-jammy` (Ubuntu 22.04,
+  ROS 2 Humble).
+- DDS: `rmw_fastrtps_cpp`, domain 0, no custom peer list or DDS XML. Both the
+  container and deployed graph use Humble.
 - Franka interfaces: `franka_ros2` v3.4.1 at upstream commit
   `b4164f555500fe50c3f44f24d4cccc452ffac442`, built in the image.
-- Base host `.50`: ROS 2 Humble, `/opt/ros/humble/setup.bash`, the deployed
-  base controller/workspace, domain 97, and localhost-only discovery. The
-  staged base processes use that native environment.
-- The existing non-interactive `tmr-user@172.16.0.50` login must be loaded in
-  the operator's SSH agent. The run command forwards only that agent socket;
-  the policy never requests, stores, copies, or mounts private-key files.
-- GPU/CUDA: not used; no GPU, CUDA toolkit, or NVIDIA driver is required.
+- Host: Linux with Docker Engine, host networking, and IPC sharing support.
+- Existing services: the deployed Humble arm, gripper, Spine, MoveIt, wrist
+  camera, ZED exporter, odometry, and swerve controller services must already
+  be running. The policy does not start duplicate hardware drivers.
+- GPU/CUDA/ROCm: not used. No GPU or GPU runtime is required.
 - Runtime Internet access: not required.
-- Runtime testbed LAN access: required for Jazzy DDS on `.100`, the base
-  login/control handoff to `.50`, the ZED JPEG endpoint on
-  `172.16.0.50:18082`, and the deployed Spine/robot services.
+- Runtime testbed network access: required for the native Humble ROS graph and
+  `172.16.16.50:18082`. Blocking Internet access is supported; blocking the
+  testbed network is not.
 - Build-time Internet access is required to clone the repository, pull the
   base image, and install image packages.
 
 ## Hardware assumptions
 
-- Two deployed Franka FR3 arms, Robotiq grippers, Franka Spine, ZED-M head
-  camera, and left/right Intel RealSense D405 wrist cameras are started by the
-  normal testbed procedure.
-- Main ZED frames come from
-  `http://172.16.0.50:18082/tmr_zed_latest.jpg`. Wrist frames remain ROS
-  topics `/wrist_camera_left/color/image_raw` and
-  `/wrist_camera_right/color/image_raw` in the Jazzy graph.
-- The base-local graph provides fresh `/swerve_drive_controller/odom`; the
-  staged adapter owns `/tmr_cycle/mission_cmd_vel` and forwards accepted,
-  fresh mission commands to `/swerve_drive_controller/cmd_vel`.
-- No GPU inference rate applies. The base motion loop is approximately 40 Hz;
-  the staged adapter watchdog is 20 Hz. Camera health requires advancing main
-  and left-wrist frames.
-- Camera placement, hand-eye transform, arm initial pose, object layout,
-  lighting, and calibrated distances must match the Task 2 setup and
-  `policy/config/`.
-- Between rounds, restore both arms, Spine, base, grippers, thermal pad, and
-  red placement pad to their documented initial state and clear all swept
-  volumes.
+- Two Franka FR3 arms, Robotiq grippers, Franka Spine, ZED-M head camera,
+  left/right RealSense D405 cameras, and the swerve-drive base are started by
+  the standard testbed procedure.
+- The base loop runs at approximately 40 Hz, its fail-closed watchdog at
+  20 Hz, and the ZED JPEG poller at approximately 10 Hz. Arm real-time control
+  remains in the deployed robot drivers.
+- Camera mounting, hand-eye calibration, arm poses, object layout, and
+  lighting must match the demonstrated Task 2 setup and `policy/config/`.
+- Between rounds, restore both arms, grippers, Spine, base pose, thermal pad,
+  black grasp base, and red placement pad; remove previous objects and clear
+  all swept volumes.

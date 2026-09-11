@@ -15,21 +15,21 @@ def test_all_motion_entrypoints_share_one_task_lock():
     assert run_from_pregrasp_to_finish.LOCK_FILE == LOCK_FILE
 
 
-def test_base_mover_runs_staged_source_in_isolated_base_graph():
+def test_base_mover_runs_bundled_source_in_native_humble_graph():
     command = base_motion._mover_command("--right-m 0.020")
     joined = " ".join(command)
     assert "guarded_lateral_step.py --right-m 0.020 --disable-collision-guard" in joined
     assert "tmr-mobile-manipulation" not in joined
-    assert command[0] == "ssh"
-    assert "ROS_DOMAIN_ID=${TMR_CYCLE_ROS_DOMAIN_ID:-97}" in joined
-    assert "ROS_LOCALHOST_ONLY=${TMR_CYCLE_ROS_LOCALHOST_ONLY:-1}" in joined
+    assert command[0] != "ssh"
+    assert command[0].endswith("python.exe") or command[0].endswith("python3")
 
 
-def test_base_login_does_not_assume_a_host_ssh_directory():
-    command = base_motion.ssh_command("true")
-    joined = " ".join(command)
-    assert "/home/aup/.ssh" not in joined
-    assert "UserKnownHostsFile=/tmp/tmr_task2_known_hosts" in joined
+def test_read_only_base_check_does_not_start_adapter():
+    source = (ROOT / "base_runtime" / "ensure_runtime.sh").read_text()
+    assert 'if ${check_only}; then' in source
+    assert source.index('if ${check_only}; then') < source.index(
+        'nohup python3 -u "${adapter}"'
+    )
 
 
 def test_arm_collision_gate_is_explicitly_disabled():

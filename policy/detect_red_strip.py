@@ -15,7 +15,7 @@ from red_strip_detector.source import HttpJpegSource
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Detect red strip labels in the TMR head-camera image")
-    parser.add_argument("--camera-url", default="http://172.16.0.50:18082/tmr_zed_latest.jpg")
+    parser.add_argument("--camera-url", default="http://172.16.16.50:18082/tmr_zed_latest.jpg")
     parser.add_argument("--image", type=Path, help="use an image file instead of the live camera")
     parser.add_argument("--roi-top", type=float, default=0.42)
     parser.add_argument("--roi-bottom", type=float, default=1.0)

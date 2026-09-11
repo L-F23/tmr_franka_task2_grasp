@@ -33,8 +33,10 @@ REQUIRED_SERVICES = {
     "/left/controller_manager/list_controllers",
     "/left/controller_manager/set_hardware_component_state",
     "/left/controller_manager/switch_controller",
-    "/left_ik/compute_fk",
-    "/left_ik/compute_ik",
+    "/compute_fk",
+    "/compute_ik",
+    "/check_state_validity",
+    "/plan_kinematic_path",
     "/franka_spine_node/get_position",
     "/right/controller_manager/list_hardware_components",
     "/right/controller_manager/list_controllers",
@@ -141,13 +143,13 @@ def ensure_viewer() -> dict:
     except Exception as error:
         raise StartupBlocked(
             "bundled camera viewer has no fresh main/left frames; verify the deployed "
-            f"camera topics and CycloneDDS connectivity: {error}"
+            f"camera topics and Humble DDS connectivity: {error}"
         ) from error
 
 
-def ensure_base_runtime() -> dict:
+def ensure_base_runtime(*, check_only: bool = False) -> dict:
     try:
-        return check_base_runtime()
+        return check_base_runtime(check_only=check_only)
     except RuntimeError as error:
         raise StartupBlocked(str(error)) from error
 
@@ -192,7 +194,11 @@ def check_only() -> dict:
         "status": "healthy",
         "checked_at_unix_s": time.time(),
         "physical_motion_commanded": False,
-        "results": [require_core_graph(), advancing_cameras()],
+        "results": [
+            require_core_graph(),
+            ensure_base_runtime(check_only=True),
+            advancing_cameras(),
+        ],
     }
 
 

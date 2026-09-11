@@ -34,12 +34,12 @@ if [[ "${1:-}" == "help" || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 [[ -d "${policy_root}" ]] || fail "policy root is missing: ${policy_root}"
-[[ -r /opt/ros/jazzy/setup.bash ]] || fail "ROS 2 Jazzy is missing from the image"
+[[ -r /opt/ros/humble/setup.bash ]] || fail "ROS 2 Humble is missing from the image"
 [[ -r "${interface_overlay}" ]] || fail \
   "bundled Franka interface overlay is missing: ${interface_overlay}"
 
 # shellcheck disable=SC1091
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/humble/setup.bash
 # shellcheck disable=SC1090
 source "${interface_overlay}"
 
@@ -50,7 +50,7 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/tmr-cache}"
 mkdir -p "${ROS_HOME}" "${ROS_LOG_DIR}" "${XDG_CACHE_HOME}"
 cd "${policy_root}"
 
-for command in curl ros2 ssh tar; do
+for command in curl ros2; do
   command -v "${command}" >/dev/null 2>&1 || fail "required command not found: ${command}"
 done
 
@@ -68,28 +68,6 @@ from moveit_msgs.srv import GetMotionPlan, GetPositionFK, GetPositionIK, GetStat
 from realsense2_camera_msgs.msg import Extrinsics
 from sensor_msgs.msg import Image
 PY
-
-stage_base_policy() {
-  local base_host="${TMR_BASE_HOST:-tmr-user@172.16.0.50}"
-  local remote_root="${TMR_BASE_REMOTE_ROOT:-/tmp/tmr-task2-policy}"
-  [[ "${remote_root}" =~ ^/tmp/tmr-task2-[A-Za-z0-9._-]+$ ]] || \
-    fail "TMR_BASE_REMOTE_ROOT must be below /tmp/tmr-task2-*"
-  local -a ssh_options=(
-    -o BatchMode=yes -o ConnectTimeout=5
-    -o ServerAliveInterval=2 -o ServerAliveCountMax=3
-    -o StrictHostKeyChecking=accept-new
-    -o UserKnownHostsFile=/tmp/tmr_task2_known_hosts
-  )
-  ssh "${ssh_options[@]}" "${base_host}" "mkdir -p '${remote_root}'" || \
-    fail "cannot reach the preconfigured base login: ${base_host}"
-  tar -C "${policy_root}" -czf - \
-      guarded_lateral_step.py stage0_wall_docking_base.py base_runtime | \
-    ssh "${ssh_options[@]}" "${base_host}" \
-      "tar -xzf - -C '${remote_root}'" || \
-    fail "failed to stage the bundled base policy on ${base_host}"
-  export TMR_BASE_REMOTE_ROOT="${remote_root}"
-  echo "Bundled base policy staged at ${base_host}:${remote_root}." >&2
-}
 
 start_camera_viewer() {
   if curl --noproxy '*' --silent --fail --max-time 1 \
@@ -129,12 +107,10 @@ case "${mode}" in
     exec /usr/bin/python3 -u quick_start.py --check-only "$@"
     ;;
   prepare)
-    stage_base_policy
     start_camera_viewer
     exec /usr/bin/python3 -u quick_start.py "$@"
     ;;
   execute)
-    stage_base_policy
     start_camera_viewer
     exec /usr/bin/python3 -u quick_start.py --execute "$@"
     ;;

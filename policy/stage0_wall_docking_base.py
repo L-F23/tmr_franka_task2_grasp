@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """CCW rotation and rear-wall docking controller for Task 2.
 
-This file is staged from the policy image and runs inside the base computer's
-isolated ROS 2 Humble graph. Rear-wall range is measured from the robot body
+This file runs in the policy container on the evaluation computer's native
+ROS 2 Humble graph. Rear-wall range is measured from the robot body
 rear face, not from the odometry origin. LiDAR is used for wall pose estimation
 only; it is not used as a general collision guard in this stage.
 """

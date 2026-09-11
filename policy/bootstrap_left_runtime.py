@@ -147,7 +147,7 @@ class Bootstrap(Node):
         # Franka's documented recovery sequence is recovery first, then
         # hardware activation, then controller activation.  Deactivating any
         # still-active controller also makes this safe on ROS 2 Humble while
-        # remaining harmless on Jazzy (where controllers normally deactivate
+        # remaining harmless on Humble (where controllers normally deactivate
         # automatically after a hardware error).
         states = self.controller_states()
         active = [name for name, state in states.items() if state == "active"]

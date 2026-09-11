@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG ROS_IMAGE=ros:jazzy-ros-base-noble@sha256:2589a8fba5257307857890173c069852c2abf913a0be7970f172478baecb09e4
+ARG ROS_IMAGE=ros:humble-ros-base-jammy@sha256:1813d3c85d7f96ff7d3012d865204583255740182db5d0065f8f8cd029a83138
 FROM ${ROS_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -17,19 +17,17 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        openssh-client \
         python3-colcon-common-extensions \
         python3-numpy \
         python3-opencv \
-        ros-jazzy-cv-bridge \
-        ros-jazzy-control-msgs \
-        ros-jazzy-controller-manager-msgs \
-        ros-jazzy-moveit-msgs \
-        ros-jazzy-nav-msgs \
-        ros-jazzy-realsense2-camera-msgs \
-        ros-jazzy-rmw-cyclonedds-cpp \
-        ros-jazzy-rosidl-default-generators \
-        tar \
+        ros-humble-cv-bridge \
+        ros-humble-control-msgs \
+        ros-humble-controller-manager-msgs \
+        ros-humble-moveit-msgs \
+        ros-humble-nav-msgs \
+        ros-humble-realsense2-camera-msgs \
+        ros-humble-rmw-fastrtps-cpp \
+        ros-humble-rosidl-default-generators \
         tini \
     && rm -rf /var/lib/apt/lists/*
 
@@ -55,8 +53,7 @@ ENV DEBIAN_FRONTEND= \
     PYTHONDONTWRITEBYTECODE=1 \
     ROS_DOMAIN_ID=0 \
     ROS_LOCALHOST_ONLY=0 \
-    RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
-    CYCLONEDDS_URI=file:///opt/tmr-task2/docker/cyclonedds.xml \
+    RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
     ROS_HOME=/tmp/tmr-ros \
     ROS_LOG_DIR=/tmp/tmr-ros/log \
     XDG_CACHE_HOME=/tmp/tmr-cache \
@@ -72,7 +69,7 @@ RUN mkdir -p /opt/tmr-interfaces/src \
         /opt/tmr-interfaces/src/ \
     && cp -a /opt/tmr-task2/third_party/franka_ros2_interfaces/franka_spine_msgs \
         /opt/tmr-interfaces/src/ \
-    && . /opt/ros/jazzy/setup.sh \
+    && . /opt/ros/humble/setup.sh \
     && cd /opt/tmr-interfaces \
     && colcon build --merge-install --cmake-args -DBUILD_TESTING=OFF \
     && rm -rf build log \

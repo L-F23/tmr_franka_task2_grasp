@@ -26,7 +26,7 @@ class DockerContractTests(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertRegex(
             dockerfile,
-            r"ARG ROS_IMAGE=ros:jazzy-ros-base-noble@sha256:[0-9a-f]{64}",
+            r"ARG ROS_IMAGE=ros:humble-ros-base-jammy@sha256:[0-9a-f]{64}",
         )
         self.assertIn(
             'ENTRYPOINT ["/usr/bin/tini", "--", '
@@ -62,8 +62,7 @@ class DockerContractTests(unittest.TestCase):
         self.assertNotIn("src=/home/aup", guide)
         self.assertNotIn("src=/run/screen", guide)
         self.assertNotIn("src=/tmp/tmr_task2_motion.lock", guide)
-        self.assertIn("SSH_AUTH_SOCK", guide)
-        self.assertIn("dst=/tmp/tmr-task2-ssh-agent.sock", guide)
+        self.assertNotIn("SSH_AUTH_SOCK", guide)
         self.assertNotIn("TMR_SSH_IDENTITY_FILE", guide)
         self.assertNotIn("--privileged \\", guide)
 
@@ -74,8 +73,9 @@ class DockerContractTests(unittest.TestCase):
         self.assertIn("colcon build --merge-install", dockerfile)
         self.assertIn("franka_spine_msgs", dockerfile)
         self.assertIn("camera_viewer.py --port 18081", entrypoint)
-        self.assertIn("stage_base_policy", entrypoint)
-        self.assertIn("guarded_lateral_step.py stage0_wall_docking_base.py base_runtime", entrypoint)
+        self.assertNotIn("stage_base_policy", entrypoint)
+        self.assertIn("/opt/ros/humble/setup.bash", entrypoint)
+        self.assertNotIn("/opt/ros/jazzy", entrypoint)
         self.assertNotIn("tmr_env.sh", entrypoint)
         self.assertNotIn("/run/screen", entrypoint)
         self.assertTrue((ROOT / "third_party" / "franka_ros2_interfaces" /
@@ -83,7 +83,7 @@ class DockerContractTests(unittest.TestCase):
         self.assertTrue((ROOT / "third_party" / "franka_ros2_interfaces" /
                          "franka_spine_msgs" / "package.xml").is_file())
 
-    def test_base_runtime_is_staged_without_an_external_repository(self):
+    def test_base_runtime_is_bundled_without_an_external_repository(self):
         source = (ROOT / "policy" / "base_runtime" /
                   "ensure_runtime.sh").read_text(encoding="utf-8")
         adapter = (ROOT / "policy" / "base_runtime" /
@@ -92,6 +92,14 @@ class DockerContractTests(unittest.TestCase):
         self.assertIn("/tmr_cycle/mission_cmd_vel", source)
         self.assertIn("/swerve_drive_controller/cmd_vel", adapter)
         self.assertNotIn("tmr-mobile-manipulation", source + adapter)
+
+    def test_humble_runtime_uses_no_cross_version_dds_configuration(self):
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        guide = (ROOT / "DOCKER.md").read_text(encoding="utf-8")
+        self.assertIn("RMW_IMPLEMENTATION=rmw_fastrtps_cpp", dockerfile)
+        self.assertNotIn("CYCLONEDDS_URI", dockerfile)
+        self.assertFalse((ROOT / "docker" / "cyclonedds.xml").exists())
+        self.assertNotIn("ROS 2 Jazzy", guide)
 
 
 if __name__ == "__main__":

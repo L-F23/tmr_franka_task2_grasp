@@ -1,79 +1,53 @@
-"""Run bundled odometry-closed-loop helpers inside the isolated base host."""
+"""Run bundled odometry-closed-loop helpers in the native Humble graph."""
 
 from __future__ import annotations
 
 import json
 import os
-import re
+from pathlib import Path
 import shlex
 import subprocess
+import sys
 
 
-BASE_HOST = os.environ.get("TMR_BASE_HOST", "tmr-user@172.16.0.50")
-REMOTE_ROOT = os.environ.get("TMR_BASE_REMOTE_ROOT", "/tmp/tmr-task2-policy")
-if not re.fullmatch(r"/tmp/tmr-task2-[A-Za-z0-9._-]+", REMOTE_ROOT):
-    raise ValueError("TMR_BASE_REMOTE_ROOT must be below /tmp/tmr-task2-*")
+LOCAL_MOVER = Path(__file__).resolve().with_name("guarded_lateral_step.py")
+ENSURE_RUNTIME = Path(__file__).resolve().parent / "base_runtime" / "ensure_runtime.sh"
 
 
-def base_environment() -> str:
-    """Return the proven base-local Humble/CycloneDDS environment."""
-    ros_setup = os.environ.get("TMR_BASE_ROS_SETUP", "/opt/ros/humble/setup.bash")
-    workspace_setup = os.environ.get(
-        "TMR_BASE_WORKSPACE_SETUP", "/home/tmr-user/ros2_ws/install/setup.bash"
-    )
-    cyclonedds = os.environ.get(
-        "TMR_BASE_CYCLONEDDS_CONFIG", "/home/tmr-user/cyclonedds.xml"
-    )
-    return (
-        f"source {shlex.quote(ros_setup)} >/dev/null 2>&1; "
-        f"if [ -r {shlex.quote(workspace_setup)} ]; then "
-        f"source {shlex.quote(workspace_setup)} >/dev/null 2>&1; fi; "
-        "export ROS_DOMAIN_ID=${TMR_CYCLE_ROS_DOMAIN_ID:-97}; "
-        "export ROS_LOCALHOST_ONLY=${TMR_CYCLE_ROS_LOCALHOST_ONLY:-1}; "
-        "export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; "
-        f"if [ -r {shlex.quote(cyclonedds)} ]; then "
-        f"export CYCLONEDDS_URI=file://{shlex.quote(cyclonedds)}; "
-        "else unset CYCLONEDDS_URI; fi"
-    )
+def base_process_environment() -> dict[str, str]:
+    """Use the same Humble DDS settings as the rest of the container."""
+    return os.environ.copy()
 
 
-def ssh_command(remote_command: str) -> list[str]:
-    """Use the testbed's existing non-interactive login; no key path is assumed."""
-    return [
-        "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-        "-o", "ServerAliveInterval=2", "-o", "ServerAliveCountMax=3",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "UserKnownHostsFile=/tmp/tmr_task2_known_hosts",
-        BASE_HOST, f"bash -lc {shlex.quote(remote_command)}",
-    ]
-
-
-def check_base_runtime(timeout_s: float = 15.0) -> dict:
-    """Start/reuse the staged zero-latching adapter and verify fresh odometry."""
-    ensure_script = f"{REMOTE_ROOT}/base_runtime/ensure_runtime.sh"
-    remote = f"{base_environment()}; exec bash {shlex.quote(ensure_script)}"
+def check_base_runtime(timeout_s: float = 15.0, *, check_only: bool = False) -> dict:
+    """Verify the base graph and optionally start the bundled safe adapter."""
+    command = ["bash", str(ENSURE_RUNTIME)]
+    if check_only:
+        command.append("--check-only")
     completed = subprocess.run(
-        ssh_command(remote), text=True, stdout=subprocess.PIPE,
+        command, text=True, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, timeout=timeout_s, check=False,
+        env=base_process_environment(),
     )
     output = (completed.stdout or "").strip()
     if completed.returncode:
         raise RuntimeError(
-            "base-local runtime preflight failed; verify the existing testbed login, "
-            "Humble workspace, controller, and odometry. "
+            "native Humble base preflight failed; verify DDS settings, controller, "
+            "and odometry. "
             f"exit={completed.returncode}, output={output[-1200:]}"
         )
     return {"label": "base_runtime", "output": output}
 
 
 def _mover_command(arguments: str) -> list[str]:
-    """Run the staged Task 2 mover in the base-local ROS graph."""
-    remote_mover = f"{REMOTE_ROOT}/guarded_lateral_step.py"
-    remote = (
-        f"{base_environment()}; timeout --signal=INT --kill-after=3 180 "
-        f"python3 -u {shlex.quote(remote_mover)} {arguments} --disable-collision-guard"
-    )
-    return ssh_command(remote)
+    """Run the bundled Task 2 mover locally in the Humble ROS graph."""
+    return [
+        sys.executable,
+        "-u",
+        str(LOCAL_MOVER),
+        *shlex.split(arguments),
+        "--disable-collision-guard",
+    ]
 
 
 def _run_mover(arguments: str, *, timeout_s: float | None = None):
@@ -83,6 +57,7 @@ def _run_mover(arguments: str, *, timeout_s: float | None = None):
         text=True,
         capture_output=True,
         timeout=timeout_s,
+        env=base_process_environment(),
     )
 
 
@@ -129,7 +104,7 @@ def split_lateral_move(distance_m: float, maximum_step_m: float = 0.08) -> list[
 def guarded_move_right(
     distance_m: float, *, speed_mps: float = 0.02, timeout_s: float = 15.0
 ) -> dict:
-    """Execute one remote step with odometry feedback and collision guard disabled."""
+    """Execute one local step with odometry feedback and collision guard disabled."""
     if not 0.008 <= abs(distance_m) <= 0.08:
         raise ValueError("absolute step distance must be in [0.008, 0.08] m")
     completed = _run_mover(
