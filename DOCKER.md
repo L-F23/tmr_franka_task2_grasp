@@ -55,7 +55,6 @@ graph, odometry, controller, and camera check:
 ```bash
 docker run --rm \
   --network host \
-  --ipc host \
   --env ROS_DOMAIN_ID=0 \
   --env ROS_LOCALHOST_ONLY=0 \
   --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
@@ -76,7 +75,6 @@ docker run --rm --interactive --tty \
   --name tmr-task2-policy \
   --stop-timeout 10 \
   --network host \
-  --ipc host \
   --env ROS_DOMAIN_ID=0 \
   --env ROS_LOCALHOST_ONLY=0 \
   --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
@@ -123,7 +121,8 @@ wrist stream reduces DDS and image-copy load during evaluation.
   container and deployed graph use Humble.
 - Franka interfaces: `franka_ros2` v3.4.1 at upstream commit
   `b4164f555500fe50c3f44f24d4cccc452ffac442`, built in the image.
-- Host: Linux with Docker Engine, host networking, and IPC sharing support.
+- Host: Linux with Docker Engine and host networking. Host IPC is deliberately
+  not shared; DDS communication with host processes uses the host network.
 - Existing services: the deployed Humble arm, gripper, Spine, MoveIt, wrist
   camera, ZED exporter, odometry, and swerve controller services must already
   be running. The policy does not start duplicate hardware drivers.

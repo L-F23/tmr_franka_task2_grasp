@@ -65,6 +65,7 @@ class DockerContractTests(unittest.TestCase):
         self.assertNotIn("SSH_AUTH_SOCK", guide)
         self.assertNotIn("TMR_SSH_IDENTITY_FILE", guide)
         self.assertNotIn("--privileged \\", guide)
+        self.assertNotIn("--ipc host", guide)
 
     def test_custom_interfaces_and_camera_bridge_are_built_into_image(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
