@@ -58,8 +58,8 @@ docker run --rm \
   --env ROS_DOMAIN_ID=0 \
   --env ROS_LOCALHOST_ONLY=0 \
   --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
-  --env TMR_MAIN_CAMERA_URL=http://172.16.16.50:18082/tmr_zed_latest.jpg \
-  --env TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/camera/color/image_rect_raw \
+  --env TMR_MAIN_CAMERA_TOPIC=/head_camera/zed/rgb/color/rect/image/compressed \
+  --env TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/color/image_raw \
   --mount type=volume,src="tmr-task2-config-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/config \
   --mount type=volume,src="tmr-task2-outputs-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/outputs \
   --mount type=volume,src="tmr-task2-runtime-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/runtime \
@@ -78,8 +78,8 @@ docker run --rm --interactive --tty \
   --env ROS_DOMAIN_ID=0 \
   --env ROS_LOCALHOST_ONLY=0 \
   --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
-  --env TMR_MAIN_CAMERA_URL=http://172.16.16.50:18082/tmr_zed_latest.jpg \
-  --env TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/camera/color/image_rect_raw \
+  --env TMR_MAIN_CAMERA_TOPIC=/head_camera/zed/rgb/color/rect/image/compressed \
+  --env TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/color/image_raw \
   --mount type=volume,src="tmr-task2-config-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/config \
   --mount type=volume,src="tmr-task2-outputs-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/outputs \
   --mount type=volume,src="tmr-task2-runtime-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/runtime \
@@ -107,10 +107,12 @@ The read-only check expects these MoveIt services:
 /plan_kinematic_path
 ```
 
-It reads the ZED frame from
-`http://172.16.16.50:18082/tmr_zed_latest.jpg` and subscribes only to the left
+It subscribes directly to the evaluator's existing ZED stream:
+`/head_camera/zed/rgb/color/rect/image/compressed`. The optional
+`TMR_MAIN_CAMERA_URL` JPEG input remains as a fallback and does not need to be
+available when the ROS ZED stream is fresh. It also subscribes only to the left
 wrist color topic needed by the policy:
-`/wrist_camera_left/camera/color/image_rect_raw`. Avoiding the unused right
+`/wrist_camera_left/color/image_raw`. Avoiding the unused right
 wrist stream reduces DDS and image-copy load during evaluation.
 
 ## Environment and dependencies
@@ -124,13 +126,13 @@ wrist stream reduces DDS and image-copy load during evaluation.
 - Host: Linux with Docker Engine and host networking. Host IPC is deliberately
   not shared; DDS communication with host processes uses the host network.
 - Existing services: the deployed Humble arm, gripper, Spine, MoveIt, wrist
-  camera, ZED exporter, odometry, and swerve controller services must already
-  be running. The policy does not start duplicate hardware drivers.
+  camera, ZED ROS publisher, odometry, and swerve controller services must
+  already be running. A separate team-specific ZED HTTP exporter is not
+  required. The policy does not start duplicate hardware drivers.
 - GPU/CUDA/ROCm: not used. No GPU or GPU runtime is required.
 - Runtime Internet access: not required.
-- Runtime testbed network access: required for the native Humble ROS graph and
-  `172.16.16.50:18082`. Blocking Internet access is supported; blocking the
-  testbed network is not.
+- Runtime testbed network access: required for the native Humble ROS graph.
+  Blocking Internet access is supported; blocking the testbed network is not.
 - Build-time Internet access is required to clone the repository, pull the
   base image, and install image packages.
 

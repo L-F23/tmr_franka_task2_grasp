@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bridge the testbed ZED JPEG and Humble wrist topic to MJPEG endpoints."""
+"""Bridge the testbed ZED and Humble wrist streams to MJPEG endpoints."""
 
 from __future__ import annotations
 
@@ -18,13 +18,14 @@ import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage, Image
 
 
 DEFAULT_TOPICS = {
-    "left": "/wrist_camera_left/camera/color/image_rect_raw",
+    "left": "/wrist_camera_left/color/image_raw",
 }
-DEFAULT_MAIN_URL = "http://172.16.16.50:18082/tmr_zed_latest.jpg"
+DEFAULT_MAIN_TOPIC = "/head_camera/zed/rgb/color/rect/image/compressed"
+DEFAULT_MAIN_URL = ""
 DIRECT_OPENER = build_opener(ProxyHandler({}))
 
 
@@ -78,7 +79,9 @@ class FrameStore:
 
 
 class CameraBridge(Node):
-    def __init__(self, store: FrameStore, topics: dict[str, str]) -> None:
+    def __init__(
+        self, store: FrameStore, topics: dict[str, str], main_topic: str
+    ) -> None:
         super().__init__("tmr_task2_camera_viewer")
         self._store = store
         self._bridge = CvBridge()
@@ -86,6 +89,25 @@ class CameraBridge(Node):
             Image, topics["left"], lambda msg: self._raw_callback("left", msg),
             qos_profile_sensor_data,
         )
+        # The evaluator already publishes this stream.  Subscribe directly so
+        # Task 2 does not depend on a team-specific HTTP exporter on port 18082.
+        self.create_subscription(
+            CompressedImage,
+            main_topic,
+            self._main_compressed_callback,
+            qos_profile_sensor_data,
+        )
+
+    def _main_compressed_callback(self, message: CompressedImage) -> None:
+        payload = bytes(message.data)
+        if not payload:
+            return
+        if payload.startswith(b"\xff\xd8") and payload.endswith(b"\xff\xd9"):
+            self._store.update_jpeg("main", payload)
+            return
+        image = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if image is not None:
+            self._store.update("main", image)
 
     def _raw_callback(self, name: str, message: Image) -> None:
         try:
@@ -183,6 +205,10 @@ def main() -> int:
     parser.add_argument(
         "--main-url", default=os.environ.get("TMR_MAIN_CAMERA_URL", DEFAULT_MAIN_URL)
     )
+    parser.add_argument(
+        "--main-topic",
+        default=os.environ.get("TMR_MAIN_CAMERA_TOPIC", DEFAULT_MAIN_TOPIC),
+    )
     parser.add_argument("--main-period-s", type=float, default=0.10)
     args = parser.parse_args()
     topics = {
@@ -190,16 +216,17 @@ def main() -> int:
         for name, topic in DEFAULT_TOPICS.items()
     }
     store = FrameStore()
-    threading.Thread(
-        target=poll_main_camera,
-        args=(store, args.main_url, max(0.05, args.main_period_s)),
-        daemon=True,
-    ).start()
+    if args.main_url:
+        threading.Thread(
+            target=poll_main_camera,
+            args=(store, args.main_url, max(0.05, args.main_period_s)),
+            daemon=True,
+        ).start()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), handler_class(store))
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     rclpy.init()
-    node = CameraBridge(store, topics)
+    node = CameraBridge(store, topics, args.main_topic)
     try:
         rclpy.spin(node)
     finally:

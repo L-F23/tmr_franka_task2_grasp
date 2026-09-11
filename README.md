@@ -78,11 +78,15 @@ cd tmr_franka_task2_grasp/policy && /usr/bin/python3 start_project.py --annotate
 
 The initialization target is stored in `config/initial_pose.json`. After every successful startup, the measured state is written to and overwrites the repository-tracked file `config/latest_initial_state.json`. Production runs must use `start_project.py`; `detect_red_strip.py` is retained only for offline debugging without robot control. After a new initial state or project code update has been verified, the changes should be committed and pushed to the remote repository.
 
-The default input is:
+The preferred live input is the evaluator's existing ROS 2 topic:
 
 ```text
-http://172.16.16.50:18082/tmr_zed_latest.jpg
+/head_camera/zed/rgb/color/rect/image/compressed
 ```
+
+If an evaluator deliberately provides a separate JPEG exporter,
+`TMR_MAIN_CAMERA_URL` can be set as an optional fallback. It is unset by
+default and is not required for the confirmed ROS 2 ZED stream.
 
 The output JSON contains the target center in pixel and normalized coordinates, the four corner coordinates, major-axis direction, pixel length and width, area, and confidence. Exit code `0` means detection succeeded, `2` means no target was found, and `3` means the camera image did not update.
 
@@ -173,7 +177,7 @@ After confirming that the robot is at the task's specified starting pose, the gr
 cd tmr_franka_task2_grasp/policy && /usr/bin/python3 -u quick_start.py --execute
 ```
 
-The quick-start entry point and every other motion entry point share the same single-instance lock. It first checks the current Humble ROS services, then restores the left arm's state-only runtime and checks the native Humble base runtime in parallel, and finally requires the frame sequence numbers from the main camera and left wrist camera to continue increasing. Healthy services are reused rather than restarted; the container starts its own camera bridge, subscribes only to `/wrist_camera_left/camera/color/image_rect_raw`, and obtains the ZED frame from `172.16.16.50:18082`. Bounded left-arm recovery runs only if the hardware is not `active` or the state stream is abnormal, in the fixed order: stop active controllers → ErrorRecovery → activate hardware → activate state broadcasters. If core drivers such as FR3, Robotiq, Spine, D405, base odometry, or IK are missing, the entry point does not guess or start a second instance. Instead, it fails before mission motion and reports the missing service, action, topic, or stale camera stream.
+The quick-start entry point and every other motion entry point share the same single-instance lock. It first checks the current Humble ROS services, then restores the left arm's state-only runtime and checks the native Humble base runtime in parallel, and finally requires the frame sequence numbers from the main camera and left wrist camera to continue increasing. Healthy services are reused rather than restarted; the container starts its own camera bridge, subscribes to `/head_camera/zed/rgb/color/rect/image/compressed` and the configured left wrist color topic, and retains the HTTP ZED source only as a fallback. Bounded left-arm recovery runs only if the hardware is not `active` or the state stream is abnormal, in the fixed order: stop active controllers → ErrorRecovery → activate hardware → activate state broadcasters. If core drivers such as FR3, Robotiq, Spine, D405, base odometry, or IK are missing, the entry point does not guess or start a second instance. Instead, it fails before mission motion and reports the missing service, action, topic, or stale camera stream.
 
 With `--execute`, the quick-start entry point passes a newly generated preparation record—valid for only 20 seconds and explicitly marked “no motion sent”—to the full workflow, avoiding duplicate initialization. Every base step still rechecks fresh odometry, stationary state, the control lease, the velocity-command subscriber, and its timeout. The base worker, zero-latching adapter, and arm-side policy client all use Humble; the FCI real-time loops remain in the deployed robot drivers.
 

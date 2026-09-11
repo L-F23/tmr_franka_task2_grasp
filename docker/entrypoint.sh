@@ -66,7 +66,7 @@ from franka_msgs.msg import FrankaRobotState
 from franka_spine_msgs.srv import GetPosition
 from moveit_msgs.srv import GetMotionPlan, GetPositionFK, GetPositionIK, GetStateValidity
 from realsense2_camera_msgs.msg import Extrinsics
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage, Image
 PY
 
 start_camera_viewer() {
