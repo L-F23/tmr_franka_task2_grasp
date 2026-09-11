@@ -27,7 +27,7 @@ from mission_runtime import (
 
 
 ROOT = Path(__file__).resolve().parent
-VIEWER = "http://127.0.0.1:18081"
+VIEWER = "http://localhost:18081"
 DEFAULT_RECORD = ROOT / "config" / "latest_pregrasp_black_base_search.json"
 DEFAULT_REFERENCE = ROOT / "captures" / "pregrasp_black_base_reference_left.jpg"
 DEFAULT_ROI = (290, 160, 250, 155)

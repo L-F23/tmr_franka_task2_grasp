@@ -15,7 +15,7 @@ from base_motion import guarded_move_right, guarded_transport
 from thermal_pad_ik import ROOT
 
 
-VIEWER = "http://127.0.0.1:18081"
+VIEWER = "http://localhost:18081"
 DEFAULT_CONFIG = ROOT / "config" / "wrist_lateral_mapping.json"
 DEFAULT_RECORD = ROOT / "config" / "latest_wrist_lateral_mapping.json"
 DEFAULT_CAPTURE_DIR = ROOT / "captures" / "wrist_lateral_mapping_20260904"

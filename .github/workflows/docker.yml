@@ -21,3 +21,42 @@ jobs:
             .
       - name: Run self-contained preflight
         run: docker run --rm tmr-task2-policy:test preflight
+      - name: Verify the isolated ZED DDS domain bridge
+        run: |
+          set -euo pipefail
+          cleanup() {
+            docker rm --force tmr-zed-bridge-test tmr-zed-publisher-test \
+              >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run --detach --rm \
+            --name tmr-zed-bridge-test \
+            --network host \
+            --env ROS_LOCALHOST_ONLY=0 \
+            --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+            --env TMR_ZED_DOMAIN_ID=1 \
+            --env TMR_ROBOT_DOMAIN_ID=0 \
+            tmr-task2-policy:test zed-bridge
+
+          docker run --detach --rm \
+            --name tmr-zed-publisher-test \
+            --network host \
+            --env ROS_DOMAIN_ID=1 \
+            --env ROS_LOCALHOST_ONLY=0 \
+            --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+            tmr-task2-policy:test shell -lc \
+            'ros2 topic pub --rate 5 \
+              /head_camera/zed/rgb/color/rect/image/compressed \
+              sensor_msgs/msg/CompressedImage \
+              "{format: jpeg, data: [255, 216, 255, 217]}"'
+
+          docker run --rm \
+            --network host \
+            --env ROS_DOMAIN_ID=0 \
+            --env ROS_LOCALHOST_ONLY=0 \
+            --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+            tmr-task2-policy:test shell -lc \
+            'timeout 30 ros2 topic echo \
+              /tmr_task2/zed/image/compressed \
+              sensor_msgs/msg/CompressedImage --once >/dev/null'

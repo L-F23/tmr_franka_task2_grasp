@@ -18,7 +18,7 @@ from alignment_detector import (
     wrist_vertical_robot_decision,
 )
 
-VIEWER = "http://127.0.0.1:18081"
+VIEWER = "http://localhost:18081"
 def frame(name: str):
     capture = cv2.VideoCapture(f"{VIEWER}/{name}.mjpg")
     ok, image = capture.read()

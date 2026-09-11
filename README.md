@@ -33,6 +33,7 @@ policy/                 Python policy and runtime entry points
   captures/             Calibration and detector reference images
   red_strip_detector/   Red-strip detection package
 docker/                 Container entrypoint
+  entrypoint.sh          Policy and isolated ZED-bridge modes
 tests/                  Repository-level automated tests
 Dockerfile              Reproducible ROS 2 policy image
 DOCKER.md               Pinned operator build and launch procedure
@@ -48,16 +49,21 @@ file.
 
 ## Docker quick start
 
-Run the Docker workflow on the current `172.16.16.50` evaluation computer. Use the complete,
-copy-ready commands in [Docker deployment](DOCKER.md#operator-commands); that
+Run the Docker workflow on the evaluation computer that can reach the head ZED
+service on `172.16.16.50` and the wrist-camera/robot services on
+`172.16.16.100`. Use the complete, copy-ready commands in
+[Docker deployment](DOCKER.md#operator-commands); that
 document starts from the submitted pinned commit and requires no host project,
 setup file, SSH connection, private-key directory, or screen session.
 
 1. Run the operator checkout and `docker build` block.
 2. Run `preflight` to validate the image and bundled ROS environment without
    contacting the robot graph or sending motion.
-3. Run `check` for read-only ROS graph and camera health checks.
-4. Only after confirming the initial pose, gripper state, clear workspace, and
+3. Start the submitted `zed-bridge` mode. It forwards only the compressed ZED
+   topic from the vision Domain into the robot-control Domain.
+4. Run `check` in the robot-control domain for read-only ROS graph and camera
+   health checks.
+5. Only after confirming the initial pose, gripper state, clear workspace, and
    reachable emergency stop, run `execute` to allow physical motion.
 
 The image defaults to `check` when no mode is supplied. It uses ROS 2 Humble
@@ -69,6 +75,10 @@ Spine ROS interfaces and includes its camera bridge. It does not mount or requir
 `/home/aup/tmr-mobile-manipulation`, `/home/aup/.ssh`, or `/run/screen`.
 Writable configuration, outputs, and runtime records use Docker volumes. The
 bundled base worker and velocity adapter run locally in the same Humble graph.
+The ZED bridge is a separate read-only process. It uses the ROS 2
+`domain_bridge` package to forward only the compressed head-camera topic from
+vision domain 1 into robot-control domain 0; the policy does not join the rest
+of the high-bandwidth vision graph.
 
 ## One-line command
 
@@ -78,15 +88,17 @@ cd tmr_franka_task2_grasp/policy && /usr/bin/python3 start_project.py --annotate
 
 The initialization target is stored in `config/initial_pose.json`. After every successful startup, the measured state is written to and overwrites the repository-tracked file `config/latest_initial_state.json`. Production runs must use `start_project.py`; `detect_red_strip.py` is retained only for offline debugging without robot control. After a new initial state or project code update has been verified, the changes should be committed and pushed to the remote repository.
 
-The preferred live input is the evaluator's existing ROS 2 topic:
+The live ZED publisher topic is:
 
 ```text
 /head_camera/zed/rgb/color/rect/image/compressed
 ```
 
-If an evaluator deliberately provides a separate JPEG exporter,
-`TMR_MAIN_CAMERA_URL` can be set as an optional fallback. It is unset by
-default and is not required for the confirmed ROS 2 ZED stream.
+The submitted Docker image supplies `zed-bridge`, an isolated ROS 2 DDS domain
+bridge. It subscribes to this topic in the ZED domain and republishes it as
+`/tmr_task2/zed/image/compressed` in the robot-control domain. The policy
+subscribes directly to the remapped ROS topic. No HTTP/JPEG exporter, proxy,
+or unpublished service is required.
 
 The output JSON contains the target center in pixel and normalized coordinates, the four corner coordinates, major-axis direction, pixel length and width, area, and confidence. Exit code `0` means detection succeeded, `2` means no target was found, and `3` means the camera image did not update.
 
@@ -177,7 +189,7 @@ After confirming that the robot is at the task's specified starting pose, the gr
 cd tmr_franka_task2_grasp/policy && /usr/bin/python3 -u quick_start.py --execute
 ```
 
-The quick-start entry point and every other motion entry point share the same single-instance lock. It first checks the current Humble ROS services, then restores the left arm's state-only runtime and checks the native Humble base runtime in parallel, and finally requires the frame sequence numbers from the main camera and left wrist camera to continue increasing. Healthy services are reused rather than restarted; the container starts its own camera bridge, subscribes to `/head_camera/zed/rgb/color/rect/image/compressed` and the configured left wrist color topic, and retains the HTTP ZED source only as a fallback. Bounded left-arm recovery runs only if the hardware is not `active` or the state stream is abnormal, in the fixed order: stop active controllers → ErrorRecovery → activate hardware → activate state broadcasters. If core drivers such as FR3, Robotiq, Spine, D405, base odometry, or IK are missing, the entry point does not guess or start a second instance. Instead, it fails before mission motion and reports the missing service, action, topic, or stale camera stream.
+The quick-start entry point and every other motion entry point share the same single-instance lock. It first checks the current Humble ROS services, then restores the left arm's state-only runtime and checks the native Humble base runtime in parallel, and finally requires the frame sequence numbers from the main camera and left wrist camera to continue increasing. Healthy services are reused rather than restarted. The separate `zed-bridge` process forwards `/head_camera/zed/rgb/color/rect/image/compressed` from the ZED domain to `/tmr_task2/zed/image/compressed` in the robot-control domain; the policy subscribes directly to the remapped ROS topic and the configured left wrist topic. Bounded left-arm recovery runs only if the hardware is not `active` or the state stream is abnormal, in the fixed order: stop active controllers → ErrorRecovery → activate hardware → activate state broadcasters. If core drivers such as FR3, Robotiq, Spine, D405, base odometry, or IK are missing, the entry point does not guess or start a second instance. Instead, it fails before mission motion and reports the missing service, action, topic, or stale camera stream.
 
 With `--execute`, the quick-start entry point passes a newly generated preparation record—valid for only 20 seconds and explicitly marked “no motion sent”—to the full workflow, avoiding duplicate initialization. Every base step still rechecks fresh odometry, stationary state, the control lease, the velocity-command subscriber, and its timeout. The base worker, zero-latching adapter, and arm-side policy client all use Humble; the FCI real-time loops remain in the deployed robot drivers.
 

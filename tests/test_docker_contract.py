@@ -55,6 +55,16 @@ class DockerContractTests(unittest.TestCase):
             flags=re.DOTALL,
         ).group("body"))
 
+        zed_bridge_branch = re.search(
+            r"\n  zed-bridge\)\n(?P<body>.*?)\n    ;;",
+            entrypoint,
+            flags=re.DOTALL,
+        )
+        self.assertIsNotNone(zed_bridge_branch)
+        self.assertIn("ros2 run domain_bridge domain_bridge", zed_bridge_branch.group("body"))
+        self.assertIn("zed_domain_bridge.yaml", zed_bridge_branch.group("body"))
+        self.assertNotIn("--execute", zed_bridge_branch.group("body"))
+
     def test_operator_commands_require_no_development_host_directories(self):
         guide = (ROOT / "DOCKER.md").read_text(encoding="utf-8")
         self.assertNotIn("__PINNED_COMMIT__", guide)
@@ -74,6 +84,10 @@ class DockerContractTests(unittest.TestCase):
         self.assertIn("colcon build --merge-install", dockerfile)
         self.assertIn("franka_spine_msgs", dockerfile)
         self.assertIn("camera_viewer.py --port 18081", entrypoint)
+        self.assertIn("ros2 run domain_bridge domain_bridge", entrypoint)
+        self.assertIn("zed-bridge", entrypoint)
+        self.assertIn("ros-humble-domain-bridge", dockerfile)
+        self.assertTrue((ROOT / "docker" / "zed_domain_bridge.yaml").is_file())
         self.assertNotIn("stage_base_policy", entrypoint)
         self.assertIn("/opt/ros/humble/setup.bash", entrypoint)
         self.assertNotIn("/opt/ros/jazzy", entrypoint)
@@ -101,6 +115,22 @@ class DockerContractTests(unittest.TestCase):
         self.assertNotIn("CYCLONEDDS_URI", dockerfile)
         self.assertFalse((ROOT / "docker" / "cyclonedds.xml").exists())
         self.assertNotIn("ROS 2 Jazzy", guide)
+
+    def test_operator_starts_isolated_zed_bridge_before_policy(self):
+        guide = (ROOT / "DOCKER.md").read_text(encoding="utf-8")
+        bridge_at = guide.index('"$POLICY_IMAGE" zed-bridge')
+        check_at = guide.index('"$POLICY_IMAGE" check')
+        self.assertLess(bridge_at, check_at)
+        self.assertIn("ZED_DOMAIN_ID=1", guide)
+        self.assertIn("TMR_MAIN_CAMERA_TOPIC=/tmr_task2/zed/image/compressed", guide)
+        self.assertNotIn("TMR_MAIN_CAMERA_SOURCE=url", guide)
+
+        workflow = (ROOT / ".github" / "workflows" / "docker.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Verify the isolated ZED DDS domain bridge", workflow)
+        self.assertIn("TMR_ZED_DOMAIN_ID=1", workflow)
+        self.assertIn("ROS_DOMAIN_ID=0", workflow)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ from set_stage1_start_from_current import wait_motion_inputs
 from thermal_pad_ik import DEFAULT_CONFIG, ROOT, pose_values, quaternion_angle_deg
 
 
-VIEWER = "http://127.0.0.1:18081"
+VIEWER = "http://localhost:18081"
 DEFAULT_CAPTURE_DIR = ROOT / "captures" / "terminal_wrist_mapping_20260904"
 DEFAULT_CONFIG_OUTPUT = ROOT / "config" / "terminal_wrist_translation_mapping.json"
 DEFAULT_RECORD = ROOT / "config" / "latest_terminal_wrist_translation_calibration.json"

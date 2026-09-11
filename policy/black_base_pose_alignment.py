@@ -23,7 +23,7 @@ from pregrasp_lateral_alignment import open_gripper
 from thermal_pad_ik import DEFAULT_CONFIG, ROOT
 
 
-VIEWER = "http://127.0.0.1:18081"
+VIEWER = "http://localhost:18081"
 DEFAULT_MAPPING = ROOT / "config" / "wrist_lateral_mapping.json"
 DEFAULT_RECORD = ROOT / "config" / "latest_pregrasp_lateral_alignment.json"
 BASE_ROIS = (

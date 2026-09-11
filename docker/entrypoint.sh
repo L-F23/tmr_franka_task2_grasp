@@ -10,6 +10,7 @@ Usage: docker run [docker options] IMAGE MODE [arguments]
 
 Modes:
   preflight          Validate the self-contained image; send no motion.
+  zed-bridge         Bridge only the ZED topic between two DDS domains.
   check              Run the read-only ROS and camera health checks.
   prepare            Prepare healthy services; do not launch the motion policy.
   execute            Launch the complete Task 2 policy with physical motion.
@@ -37,11 +38,16 @@ fi
 [[ -r /opt/ros/humble/setup.bash ]] || fail "ROS 2 Humble is missing from the image"
 [[ -r "${interface_overlay}" ]] || fail \
   "bundled Franka interface overlay is missing: ${interface_overlay}"
+[[ -r /opt/tmr-task2/docker/zed_domain_bridge.yaml ]] || fail \
+  "bundled ZED domain-bridge configuration is missing"
 
 # shellcheck disable=SC1091
 source /opt/ros/humble/setup.bash
 # shellcheck disable=SC1090
 source "${interface_overlay}"
+
+ros2 pkg prefix domain_bridge >/dev/null 2>&1 || fail \
+  "bundled ROS 2 domain_bridge package is unavailable"
 
 export PYTHONPATH="/usr/lib/python3/dist-packages:${PYTHONPATH:-}"
 export ROS_HOME="${ROS_HOME:-/tmp/tmr-ros}"
@@ -71,7 +77,7 @@ PY
 
 start_camera_viewer() {
   if curl --noproxy '*' --silent --fail --max-time 1 \
-      http://127.0.0.1:18081/status.json >/dev/null 2>&1; then
+      http://localhost:18081/status.json >/dev/null 2>&1; then
     return
   fi
   /usr/bin/python3 -u camera_viewer.py --port 18081 \
@@ -79,7 +85,7 @@ start_camera_viewer() {
   readonly viewer_pid=$!
   for _ in $(seq 1 40); do
     if curl --noproxy '*' --silent --fail --max-time 1 \
-        http://127.0.0.1:18081/status.json >/dev/null 2>&1; then
+        http://localhost:18081/status.json >/dev/null 2>&1; then
       echo "Bundled camera viewer started (pid ${viewer_pid})." >&2
       return
     fi
@@ -102,6 +108,20 @@ case "${mode}" in
   preflight)
     echo "Container preflight passed; no motion command was sent."
     ;;
+  zed-bridge)
+    zed_domain="${TMR_ZED_DOMAIN_ID:-1}"
+    robot_domain="${TMR_ROBOT_DOMAIN_ID:-0}"
+    [[ "${zed_domain}" =~ ^[0-9]+$ && "${zed_domain}" -le 232 ]] || fail \
+      "TMR_ZED_DOMAIN_ID must be an integer from 0 through 232"
+    [[ "${robot_domain}" =~ ^[0-9]+$ && "${robot_domain}" -le 232 ]] || fail \
+      "TMR_ROBOT_DOMAIN_ID must be an integer from 0 through 232"
+    [[ "${zed_domain}" != "${robot_domain}" ]] || fail \
+      "ZED and robot domains are identical; a domain bridge is unnecessary"
+    exec ros2 run domain_bridge domain_bridge \
+      --from "${zed_domain}" \
+      --to "${robot_domain}" \
+      /opt/tmr-task2/docker/zed_domain_bridge.yaml "$@"
+    ;;
   check)
     start_camera_viewer
     exec /usr/bin/python3 -u quick_start.py --check-only "$@"
@@ -115,6 +135,7 @@ case "${mode}" in
     exec /usr/bin/python3 -u quick_start.py --execute "$@"
     ;;
   start-project)
+    start_camera_viewer
     exec /usr/bin/python3 -u start_project.py "$@"
     ;;
   offline-detect)

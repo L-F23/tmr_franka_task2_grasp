@@ -15,7 +15,7 @@ from base_motion import guarded_move_forward
 
 
 ROOT = Path(__file__).resolve().parent
-VIEWER = "http://127.0.0.1:18081"
+VIEWER = "http://localhost:18081"
 DEFAULT_CONFIG = ROOT / "config" / "table_edge_reference.json"
 DEFAULT_RECORD = ROOT / "config" / "latest_table_edge_alignment.json"
 

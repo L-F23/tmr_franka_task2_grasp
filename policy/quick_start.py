@@ -25,7 +25,7 @@ from base_motion import check_base_runtime
 
 ROOT = Path(__file__).resolve().parent
 READY_RECORD = ROOT / "runtime" / "latest_quick_start.json"
-VIEWER_URL = "http://127.0.0.1:18081/status.json"
+VIEWER_URL = "http://localhost:18081/status.json"
 DIRECT_OPENER = build_opener(ProxyHandler({}))
 
 REQUIRED_SERVICES = {
@@ -141,9 +141,18 @@ def ensure_viewer() -> dict:
     try:
         return advancing_cameras()
     except Exception as error:
+        main_topic = os.environ.get(
+            "TMR_MAIN_CAMERA_TOPIC",
+            "/head_camera/zed/rgb/color/rect/image/compressed",
+        )
+        left_topic = os.environ.get(
+            "TMR_LEFT_CAMERA_TOPIC",
+            "/wrist_camera_left/color/image_raw",
+        )
         raise StartupBlocked(
             "bundled camera viewer has no fresh main/left frames; verify the deployed "
-            f"camera topics and Humble DDS connectivity: {error}"
+            "camera topics, zed-bridge, and Humble DDS connectivity: "
+            f"main_topic={main_topic}, left_topic={left_topic}: {error}"
         ) from error
 
 

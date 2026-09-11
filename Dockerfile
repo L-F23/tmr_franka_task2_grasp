@@ -23,6 +23,7 @@ RUN apt-get update \
         ros-humble-cv-bridge \
         ros-humble-control-msgs \
         ros-humble-controller-manager-msgs \
+        ros-humble-domain-bridge \
         ros-humble-moveit-msgs \
         ros-humble-nav-msgs \
         ros-humble-realsense2-camera-msgs \

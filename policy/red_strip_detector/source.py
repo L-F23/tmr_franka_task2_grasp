@@ -29,7 +29,11 @@ class HttpJpegSource:
             payload = response.read(8_000_001)
             if len(payload) > 8_000_000:
                 raise RuntimeError("camera JPEG exceeds 8 MB limit")
-            marker = response.headers.get("Last-Modified") or hashlib.sha256(payload).hexdigest()
+            marker = (
+                response.headers.get("X-TMR-Frame-Sequence")
+                or response.headers.get("Last-Modified")
+                or hashlib.sha256(payload).hexdigest()
+            )
         if marker == self._last_marker:
             return None
         encoded = np.frombuffer(payload, np.uint8)

@@ -6,7 +6,7 @@
   "zed": {
     "status": "live_verified",
     "serial_number": 17064700,
-    "source_url": "http://172.16.0.50:18082/tmr_zed_latest.jpg",
+    "source_topic": "/head_camera/zed/rgb/color/rect/image/compressed",
     "source_url_status": "historical capture metadata; not used at runtime",
     "vision_domain_id": 1,
     "image_width_px": 1280,

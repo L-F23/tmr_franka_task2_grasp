@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""Bridge the testbed ZED and Humble wrist streams to MJPEG endpoints."""
+"""Expose the ZED and wrist ROS streams to policy subprocesses."""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import time
-from urllib.request import ProxyHandler, build_opener
 
 import cv2
 import numpy as np
@@ -25,8 +23,6 @@ DEFAULT_TOPICS = {
     "left": "/wrist_camera_left/color/image_raw",
 }
 DEFAULT_MAIN_TOPIC = "/head_camera/zed/rgb/color/rect/image/compressed"
-DEFAULT_MAIN_URL = ""
-DIRECT_OPENER = build_opener(ProxyHandler({}))
 
 
 class FrameStore:
@@ -89,8 +85,6 @@ class CameraBridge(Node):
             Image, topics["left"], lambda msg: self._raw_callback("left", msg),
             qos_profile_sensor_data,
         )
-        # The evaluator already publishes this stream.  Subscribe directly so
-        # Task 2 does not depend on a team-specific HTTP exporter on port 18082.
         self.create_subscription(
             CompressedImage,
             main_topic,
@@ -118,31 +112,6 @@ class CameraBridge(Node):
         self._store.update(name, image)
 
 
-def poll_main_camera(store: FrameStore, url: str, period_s: float) -> None:
-    """Poll the base-local atomic JPEG without using an HTTP proxy."""
-    previous_digest = None
-    while True:
-        started = time.monotonic()
-        try:
-            with DIRECT_OPENER.open(url, timeout=1.0) as response:
-                payload = response.read(8_000_001)
-            valid = (
-                16 <= len(payload) <= 8_000_000
-                and payload.startswith(b"\xff\xd8")
-                and payload.endswith(b"\xff\xd9")
-            )
-            if valid:
-                digest = hashlib.blake2s(payload, digest_size=16).digest()
-                if digest != previous_digest:
-                    store.update_jpeg("main", payload)
-                    previous_digest = digest
-        except Exception:
-            pass
-        remaining = period_s - (time.monotonic() - started)
-        if remaining > 0:
-            time.sleep(remaining)
-
-
 def handler_class(store: FrameStore):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
@@ -154,6 +123,9 @@ def handler_class(store: FrameStore):
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
+                return
+            if path in ("/main.jpg", "/left.jpg"):
+                self._snapshot(path[1:-4])
                 return
             if path in ("/main.mjpg", "/left.mjpg"):
                 self._stream(path[1:-5])
@@ -170,6 +142,20 @@ def handler_class(store: FrameStore):
                 self.wfile.write(payload)
                 return
             self.send_error(404)
+
+        def _snapshot(self, name: str) -> None:
+            sequence, frame = store.wait_for_frame(name, -1)
+            status = store.status()
+            if frame is None or not status["healthy"].get(name, False):
+                self.send_error(503, f"{name} frame is unavailable or stale")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(frame)))
+            self.send_header("Cache-Control", "no-store, max-age=0")
+            self.send_header("X-TMR-Frame-Sequence", str(sequence))
+            self.end_headers()
+            self.wfile.write(frame)
 
         def _stream(self, name: str) -> None:
             self.send_response(200)
@@ -203,26 +189,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=18081)
     parser.add_argument(
-        "--main-url", default=os.environ.get("TMR_MAIN_CAMERA_URL", DEFAULT_MAIN_URL)
-    )
-    parser.add_argument(
         "--main-topic",
         default=os.environ.get("TMR_MAIN_CAMERA_TOPIC", DEFAULT_MAIN_TOPIC),
     )
-    parser.add_argument("--main-period-s", type=float, default=0.10)
     args = parser.parse_args()
     topics = {
         name: os.environ.get(f"TMR_{name.upper()}_CAMERA_TOPIC", topic)
         for name, topic in DEFAULT_TOPICS.items()
     }
     store = FrameStore()
-    if args.main_url:
-        threading.Thread(
-            target=poll_main_camera,
-            args=(store, args.main_url, max(0.05, args.main_period_s)),
-            daemon=True,
-        ).start()
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler_class(store))
+    server = ThreadingHTTPServer(("localhost", args.port), handler_class(store))
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     rclpy.init()

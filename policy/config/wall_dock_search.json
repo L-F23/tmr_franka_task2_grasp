@@ -14,7 +14,7 @@
   "required_consecutive_visible_frames": 2,
   "maximum_camera_frame_age_s": 0.5,
   "camera": {
-    "viewer_base_url": "http://127.0.0.1:18081",
+    "viewer_base_url": "http://localhost:18081",
     "stream_name": "main"
   }
 }

@@ -19,7 +19,7 @@ from execute_thermal_pad_grasp import ThermalPadExecutor
 from thermal_pad_ik import DEFAULT_CONFIG, ROOT
 
 
-VIEWER = "http://127.0.0.1:18081"
+VIEWER = "http://localhost:18081"
 DEFAULT_ALIGNMENT_CONFIG = ROOT / "config" / "pregrasp_lateral_alignment.json"
 DEFAULT_WRIST_MAPPING = ROOT / "config" / "wrist_lateral_mapping.json"
 DEFAULT_RECORD = ROOT / "config" / "latest_pregrasp_lateral_alignment.json"

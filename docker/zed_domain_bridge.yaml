@@ -1,0 +1,12 @@
+name: tmr_task2_zed_domain_bridge
+from_domain: 1
+to_domain: 0
+topics:
+  /head_camera/zed/rgb/color/rect/image/compressed:
+    type: sensor_msgs/msg/CompressedImage
+    remap: /tmr_task2/zed/image/compressed
+    qos:
+      reliability: best_effort
+      durability: volatile
+      history: keep_last
+      depth: 1

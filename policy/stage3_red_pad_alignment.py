@@ -22,7 +22,7 @@ from colored_pad_detector import (
 
 
 ROOT = Path(__file__).resolve().parent
-VIEWER = "http://127.0.0.1:18081"
+VIEWER = "http://localhost:18081"
 # Current table calibration, supplied from the thermal-pad center.  The
 # operator specified image-right to image-left as 52/41.5/29/16 cm, then
 # requested cumulative uniform corrections totalling -2.7 cm.  Detector order
