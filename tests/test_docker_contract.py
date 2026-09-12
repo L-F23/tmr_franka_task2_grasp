@@ -81,6 +81,9 @@ class DockerContractTests(unittest.TestCase):
         self.assertNotIn("TMR_SSH_IDENTITY_FILE", guide)
         self.assertNotIn("--privileged \\", guide)
         self.assertNotIn("--ipc host", guide)
+        self.assertIn("docker build --pull --no-cache", guide)
+        self.assertIn('  "$POLICY_CHECKOUT"', guide)
+        self.assertIn("help 2>&1 | grep -q 'zed-bridge'", guide)
 
     def test_custom_interfaces_and_camera_bridge_are_built_into_image(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")

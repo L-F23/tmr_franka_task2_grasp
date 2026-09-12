@@ -55,6 +55,9 @@ service on `172.16.16.50` and the wrist-camera/robot services on
 [Docker deployment](DOCKER.md#operator-commands); that
 document starts from the submitted pinned commit and requires no host project,
 setup file, SSH connection, private-key directory, or screen session.
+The documented build uses the explicit clean-checkout path and verifies that
+the resulting image advertises the `zed-bridge` mode, preventing an old local
+build context from being mislabeled with the new revision.
 
 1. Run the operator checkout and `docker build` block.
 2. Run `preflight` to validate the image and bundled ROS environment without

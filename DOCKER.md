@@ -38,12 +38,19 @@ git checkout --detach "$POLICY_COMMIT"
 test "$(git rev-parse HEAD)" = "$POLICY_COMMIT"
 test -z "$(git status --porcelain)"
 
-docker build --pull \
+docker build --pull --no-cache \
   --build-arg POLICY_UID="$(id -u)" \
   --build-arg POLICY_GID="$(id -g)" \
   --build-arg POLICY_REVISION="$POLICY_COMMIT" \
   --tag "$POLICY_IMAGE" \
-  .
+  "$POLICY_CHECKOUT"
+
+# Fail immediately if an old image or the wrong build context was used. The
+# revision label alone is insufficient because it is supplied as a build arg.
+test "$(docker image inspect \
+  --format='{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+  "$POLICY_IMAGE")" = "$POLICY_COMMIT"
+docker run --rm "$POLICY_IMAGE" help 2>&1 | grep -q 'zed-bridge'
 
 docker volume create "tmr-task2-config-${POLICY_COMMIT}" >/dev/null
 docker volume create "tmr-task2-outputs-${POLICY_COMMIT}" >/dev/null
