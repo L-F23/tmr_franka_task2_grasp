@@ -112,6 +112,7 @@ class DockerContractTests(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         guide = (ROOT / "DOCKER.md").read_text(encoding="utf-8")
         self.assertIn("RMW_IMPLEMENTATION=rmw_fastrtps_cpp", dockerfile)
+        self.assertIn("FASTDDS_BUILTIN_TRANSPORTS=UDPv4", dockerfile)
         self.assertNotIn("CYCLONEDDS_URI", dockerfile)
         self.assertFalse((ROOT / "docker" / "cyclonedds.xml").exists())
         self.assertNotIn("ROS 2 Jazzy", guide)
@@ -123,6 +124,7 @@ class DockerContractTests(unittest.TestCase):
         self.assertLess(bridge_at, check_at)
         self.assertIn("ZED_DOMAIN_ID=1", guide)
         self.assertIn("TMR_MAIN_CAMERA_TOPIC=/tmr_task2/zed/image/compressed", guide)
+        self.assertGreaterEqual(guide.count("FASTDDS_BUILTIN_TRANSPORTS=UDPv4"), 6)
         self.assertNotIn("TMR_MAIN_CAMERA_SOURCE=url", guide)
 
         workflow = (ROOT / ".github" / "workflows" / "docker.yml").read_text(
@@ -131,6 +133,7 @@ class DockerContractTests(unittest.TestCase):
         self.assertIn("Verify the isolated ZED DDS domain bridge", workflow)
         self.assertIn("TMR_ZED_DOMAIN_ID=1", workflow)
         self.assertIn("ROS_DOMAIN_ID=0", workflow)
+        self.assertEqual(workflow.count("FASTDDS_BUILTIN_TRANSPORTS=UDPv4"), 3)
 
 
 if __name__ == "__main__":

@@ -67,8 +67,9 @@ setup file, SSH connection, private-key directory, or screen session.
    reachable emergency stop, run `execute` to allow physical motion.
 
 The image defaults to `check` when no mode is supplied. It uses ROS 2 Humble
-and Fast DDS to match the current native Humble graph; no Jazzy participant or
-explicit DDS peer list is created. Its entrypoint is
+and Fast DDS over UDPv4 to match the current native Humble graph and to avoid
+cross-container shared-memory transport; no Jazzy participant or explicit DDS
+peer list is created. Its entrypoint is
 `/usr/bin/tini -- /opt/tmr-task2/docker/entrypoint.sh`, and the entrypoint runs
 the policy from `/opt/tmr-task2/policy`. The image builds the pinned Franka and
 Spine ROS interfaces and includes its camera bridge. It does not mount or require `/home/aup/tmr_env.sh`,
@@ -97,8 +98,10 @@ The live ZED publisher topic is:
 The submitted Docker image supplies `zed-bridge`, an isolated ROS 2 DDS domain
 bridge. It subscribes to this topic in the ZED domain and republishes it as
 `/tmr_task2/zed/image/compressed` in the robot-control domain. The policy
-subscribes directly to the remapped ROS topic. No HTTP/JPEG exporter, proxy,
-or unpublished service is required.
+subscribes directly to the remapped ROS topic. Therefore the bridge must be
+running before `check` or `execute`, and those policy commands must set
+`TMR_MAIN_CAMERA_TOPIC=/tmr_task2/zed/image/compressed`, not the source topic.
+No HTTP/JPEG exporter, proxy, or unpublished service is required.
 
 The output JSON contains the target center in pixel and normalized coordinates, the four corner coordinates, major-axis direction, pixel length and width, area, and confidence. Exit code `0` means detection succeeded, `2` means no target was found, and `3` means the camera image did not update.
 

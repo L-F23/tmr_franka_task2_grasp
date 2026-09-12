@@ -55,6 +55,7 @@ ENV DEBIAN_FRONTEND= \
     ROS_DOMAIN_ID=0 \
     ROS_LOCALHOST_ONLY=0 \
     RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+    FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
     ROS_HOME=/tmp/tmr-ros \
     ROS_LOG_DIR=/tmp/tmr-ros/log \
     XDG_CACHE_HOME=/tmp/tmr-cache \

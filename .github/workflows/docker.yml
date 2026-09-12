@@ -25,8 +25,15 @@ jobs:
         run: |
           set -euo pipefail
           cleanup() {
+            result=$?
+            trap - EXIT
+            if [ "$result" -ne 0 ]; then
+              docker logs tmr-zed-bridge-test || true
+              docker logs tmr-zed-publisher-test || true
+            fi
             docker rm --force tmr-zed-bridge-test tmr-zed-publisher-test \
               >/dev/null 2>&1 || true
+            exit "$result"
           }
           trap cleanup EXIT
 
@@ -35,6 +42,7 @@ jobs:
             --network host \
             --env ROS_LOCALHOST_ONLY=0 \
             --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+            --env FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
             --env TMR_ZED_DOMAIN_ID=1 \
             --env TMR_ROBOT_DOMAIN_ID=0 \
             tmr-task2-policy:test zed-bridge
@@ -45,6 +53,7 @@ jobs:
             --env ROS_DOMAIN_ID=1 \
             --env ROS_LOCALHOST_ONLY=0 \
             --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+            --env FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
             tmr-task2-policy:test shell -lc \
             'ros2 topic pub --rate 5 \
               /head_camera/zed/rgb/color/rect/image/compressed \
@@ -56,6 +65,7 @@ jobs:
             --env ROS_DOMAIN_ID=0 \
             --env ROS_LOCALHOST_ONLY=0 \
             --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+            --env FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
             tmr-task2-policy:test shell -lc \
             'timeout 30 ros2 topic echo \
               /tmr_task2/zed/image/compressed \

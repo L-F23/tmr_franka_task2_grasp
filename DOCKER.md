@@ -65,6 +65,7 @@ docker run --rm \
   --env ROS_DOMAIN_ID="$ZED_DOMAIN_ID" \
   --env ROS_LOCALHOST_ONLY=0 \
   --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+  --env FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
   "$POLICY_IMAGE" shell -lc \
   'timeout 30 ros2 topic echo \
     /head_camera/zed/rgb/color/rect/image/compressed \
@@ -89,6 +90,7 @@ docker run --detach --rm \
   --network host \
   --env ROS_LOCALHOST_ONLY=0 \
   --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+  --env FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
   --env TMR_ZED_DOMAIN_ID="$ZED_DOMAIN_ID" \
   --env TMR_ROBOT_DOMAIN_ID="$ROBOT_DOMAIN_ID" \
   "$POLICY_IMAGE" zed-bridge
@@ -98,6 +100,7 @@ docker run --rm \
   --env ROS_DOMAIN_ID="$ROBOT_DOMAIN_ID" \
   --env ROS_LOCALHOST_ONLY=0 \
   --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+  --env FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
   "$POLICY_IMAGE" shell -lc \
   'timeout 30 ros2 topic echo \
     /tmr_task2/zed/image/compressed \
@@ -114,6 +117,7 @@ docker run --rm \
   --env ROS_DOMAIN_ID="$ROBOT_DOMAIN_ID" \
   --env ROS_LOCALHOST_ONLY=0 \
   --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+  --env FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
   --env TMR_MAIN_CAMERA_TOPIC=/tmr_task2/zed/image/compressed \
   --env TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/color/image_raw \
   --mount type=volume,src="tmr-task2-config-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/config \
@@ -134,6 +138,7 @@ docker run --rm --interactive --tty \
   --env ROS_DOMAIN_ID="$ROBOT_DOMAIN_ID" \
   --env ROS_LOCALHOST_ONLY=0 \
   --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+  --env FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
   --env TMR_MAIN_CAMERA_TOPIC=/tmr_task2/zed/image/compressed \
   --env TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/color/image_raw \
   --mount type=volume,src="tmr-task2-config-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/config \
@@ -181,7 +186,10 @@ wrist stream reduces DDS and image-copy load during evaluation.
 
 - Image base: digest-pinned `ros:humble-ros-base-jammy` (Ubuntu 22.04,
   ROS 2 Humble).
-- DDS: `rmw_fastrtps_cpp`, no custom peer list or DDS XML. The policy container
+- DDS: `rmw_fastrtps_cpp` with `FASTDDS_BUILTIN_TRANSPORTS=UDPv4`, no custom
+  peer list or DDS XML. UDP-only transport prevents Fast DDS from selecting
+  shared memory between containers that share the host network but have
+  separate IPC namespaces. The policy container
   uses robot-control domain 0. The independent `domain_bridge` participant
   receives the ZED topic from vision domain 1 and republishes only that topic
   into domain 0. Both containers and deployed graphs use Humble.
