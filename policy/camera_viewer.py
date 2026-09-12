@@ -20,9 +20,9 @@ from sensor_msgs.msg import CompressedImage, Image
 
 
 DEFAULT_TOPICS = {
-    "left": "/wrist_camera_left/color/image_raw",
+    "left": "/wrist_camera_left/camera/color/image_rect_raw",
 }
-DEFAULT_MAIN_TOPIC = "/head_camera/zed/rgb/color/rect/image/compressed"
+DEFAULT_MAIN_TOPIC = "/tmr_task2/zed/image/compressed"
 
 
 class FrameStore:

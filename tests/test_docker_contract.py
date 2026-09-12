@@ -34,6 +34,11 @@ class DockerContractTests(unittest.TestCase):
             dockerfile,
         )
         self.assertIn("POLICY_ROOT=/opt/tmr-task2/policy", dockerfile)
+        self.assertIn("TMR_MAIN_CAMERA_TOPIC=/tmr_task2/zed/image/compressed", dockerfile)
+        self.assertIn(
+            "TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/camera/color/image_rect_raw",
+            dockerfile,
+        )
         self.assertIn("WORKDIR /opt/tmr-task2/policy", dockerfile)
         self.assertIn('CMD ["check"]', dockerfile)
 

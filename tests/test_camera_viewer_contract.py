@@ -6,7 +6,7 @@ SOURCE = (ROOT / "policy" / "camera_viewer.py").read_text(encoding="utf-8")
 
 
 def test_main_camera_consumes_a_compressed_ros_topic_directly():
-    assert 'DEFAULT_MAIN_TOPIC = "/head_camera/zed/rgb/color/rect/image/compressed"' in SOURCE
+    assert 'DEFAULT_MAIN_TOPIC = "/tmr_task2/zed/image/compressed"' in SOURCE
     assert "TMR_MAIN_CAMERA_TOPIC" in SOURCE
     assert "CompressedImage" in SOURCE
 
@@ -17,7 +17,7 @@ def test_viewer_exposes_in_container_snapshots_for_policy_subprocesses():
 
 
 def test_only_required_left_wrist_camera_joins_the_humble_graph():
-    assert '"left": "/wrist_camera_left/color/image_raw"' in SOURCE
+    assert '"left": "/wrist_camera_left/camera/color/image_rect_raw"' in SOURCE
     assert '"right"' not in SOURCE
     assert "qos_profile_sensor_data" in SOURCE
 

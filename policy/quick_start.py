@@ -143,11 +143,11 @@ def ensure_viewer() -> dict:
     except Exception as error:
         main_topic = os.environ.get(
             "TMR_MAIN_CAMERA_TOPIC",
-            "/head_camera/zed/rgb/color/rect/image/compressed",
+            "/tmr_task2/zed/image/compressed",
         )
         left_topic = os.environ.get(
             "TMR_LEFT_CAMERA_TOPIC",
-            "/wrist_camera_left/color/image_raw",
+            "/wrist_camera_left/camera/color/image_rect_raw",
         )
         raise StartupBlocked(
             "bundled camera viewer has no fresh main/left frames; verify the deployed "

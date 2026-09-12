@@ -119,7 +119,7 @@ docker run --rm \
   --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
   --env FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
   --env TMR_MAIN_CAMERA_TOPIC=/tmr_task2/zed/image/compressed \
-  --env TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/color/image_raw \
+  --env TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/camera/color/image_rect_raw \
   --mount type=volume,src="tmr-task2-config-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/config \
   --mount type=volume,src="tmr-task2-outputs-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/outputs \
   --mount type=volume,src="tmr-task2-runtime-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/runtime \
@@ -140,7 +140,7 @@ docker run --rm --interactive --tty \
   --env RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
   --env FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
   --env TMR_MAIN_CAMERA_TOPIC=/tmr_task2/zed/image/compressed \
-  --env TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/color/image_raw \
+  --env TMR_LEFT_CAMERA_TOPIC=/wrist_camera_left/camera/color/image_rect_raw \
   --mount type=volume,src="tmr-task2-config-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/config \
   --mount type=volume,src="tmr-task2-outputs-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/outputs \
   --mount type=volume,src="tmr-task2-runtime-${POLICY_COMMIT}",dst=/opt/tmr-task2/policy/runtime \
@@ -179,7 +179,7 @@ The `zed-bridge` container subscribes to the evaluator's existing ZED stream,
 republishes only that stream as `/tmr_task2/zed/image/compressed` in the
 robot-control domain. The policy subscribes directly to that ROS topic and to
 the left wrist color topic:
-`/wrist_camera_left/color/image_raw`. Avoiding the unused right
+`/wrist_camera_left/camera/color/image_rect_raw`. Avoiding the unused right
 wrist stream reduces DDS and image-copy load during evaluation.
 
 ## Environment and dependencies
